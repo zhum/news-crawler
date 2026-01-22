@@ -1,0 +1,10 @@
+scrapy
+markdownify
+langchain-ollama
+langchain-core
+rich
+pyyaml
+feedparser
+
+
+llama-cpp-python

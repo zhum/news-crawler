@@ -1,0 +1,33 @@
+spider:
+  user_agent: "newsfetcher"
+  download_delay: 1
+  concurrent_requests_per_domain: 1
+  robotstxt_obey: true
+
+logging:
+  log_file: "newsfetcher.log"
+  log_level: "INFO"
+
+ai:
+  model: "llama3.1-8b-long-ctx"
+  temperature: 0.01
+  max_lines: 300
+
+sites:
+  - name: News website
+    url: https://www.newswebsite.com/news/feed
+    css: div.card-body
+    link: a.article-link::attr(href)
+    headercss: .articleHeader::text
+    articlecss: .articleBody
+  - name: RSS website
+    url: https://www.rsswebsite.org/feed
+    css: rss
+    link: link
+    headercss: h1::text
+    articlecss: .article-body
+
+output:
+  base_dir: "."
+  texts_dir: "texts"
+  summary_file: "summary.json"

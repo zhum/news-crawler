@@ -1,0 +1,46 @@
+[tool.poetry]
+name = "newsfetcher"
+version = "0.1.0"
+description = "HPC news crawler and AI summarizer"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+packages = [{include = "newscrawler"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+scrapy = "^2.11.2"
+markdownify = "^0.13.1"
+langchain-ollama = "^0.2.0"
+langchain-core = "^0.3.0"
+rich = "^13.8.0"
+pyyaml = "^6.0.2"
+feedparser = "^6.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+black = "^24.8.0"
+isort = "^5.13.0"
+flake8 = "^7.1.0"
+mypy = "^1.11.0"
+
+[tool.poetry.scripts]
+crawl = "crawl:main"
+ai-summary = "ai_summary:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
