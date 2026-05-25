@@ -126,9 +126,11 @@ def get_groups(config):
     }]
 
 
-def process_config(config_path, archive_dir=None):
+def process_config(config_path, archive_dir=None, group_filter=None):
     config = yaml.safe_load(Path(config_path).read_text())
     groups = get_groups(config)
+    if group_filter:
+        groups = [g for g in groups if g.get('name') == group_filter]
     ai_cfg = config.get('ai', {})
     model = ai_cfg.get('model', MODEL)
     temp = ai_cfg.get('temperature', TEMP)
@@ -147,11 +149,15 @@ def process_config(config_path, archive_dir=None):
 if len(sys.argv) > 1 and sys.argv[1] == '--config':
     config_path = sys.argv[2] if len(sys.argv) > 2 else 'config.yaml'
     archive_dir = None
+    group_filter = None
     args = sys.argv[3:]
     if '--archive' in args:
         idx = args.index('--archive')
         archive_dir = args[idx + 1]
-    process_config(config_path, archive_dir)
+    if '--group' in args:
+        idx = args.index('--group')
+        group_filter = args[idx + 1]
+    process_config(config_path, archive_dir, group_filter)
 else:
     outfile = sys.argv[1] if len(sys.argv) > 1 else None
     added_file = sys.argv[2] if len(sys.argv) > 2 else 'added.txt'
