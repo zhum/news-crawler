@@ -262,7 +262,6 @@ def split_articles(content: str) -> List[ArxivArticle]:
 #                 self.model = AutoModelForCausalLM.from_pretrained(
 #                     model_path,
 #                     device_map=device,
-#                     # torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
 #                 )
 
 #             console.print("[green]Model loaded successfully[/green]")
@@ -390,9 +389,13 @@ def process_files(
         List of article dictionaries with summaries
     """
     if prompt_template is None:
-        prompt_template = """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-You are an expert in computer science research. Summarize the paper in 2-3 concise, technical sentences.
-DO NOT provide notes, suggestions, or conversational filler. Output ONLY the summary.<|eot_id|><|start_header_id|>user<|end_header_id|>
+        prompt_template = """
+<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+You are an expert in computer science research.
+Summarize the paper in 2-3 concise, technical sentences.
+DO NOT provide notes, suggestions, or conversational filler.
+Output ONLY the summary.<|eot_id|><|start_header_id|>user<|end_header_id|>
+
 Title: {title}
 Categories: {categories}
 Abstract: {abstract}
@@ -454,8 +457,8 @@ SUMMARY: """
                 )
 
                 result['summary'] = summary
-                console.print(f": {summary}")
-                console.print("----------------")
+                # console.print(f": {summary}")
+                # console.print("----------------")
                 result['source_file'] = str(file_path)
                 all_results.append(result)
 
@@ -477,58 +480,58 @@ def post_process(model_path: str):
     Analyzes each article summary and ranks it (1-10)
     on multiple research areas.
     """
-    RANKING_AREAS = [
-        "New AI Model",
-        "New Hardware Technology",
-        "New software library, driver, framework",
-        "Parallel computing",
-        "Hardware Architecture",
-        "Computational Engineering",
-        "Active Sensing & Perception",
-        "Autonomous Systems",
-        "Decision-Theoretic Modeling",
-        "Job Scheduling & Orchestration",
-        "Fault Tolerance & Checkpointing",
-        "Interconnects & Networking",
-        "Energy & Power Awareness",
-        "GPU/TPU/NPU/LPU Acceleration",
-        "Computational Engineering",
-        "Agentic Reasoning",
-        "Ethical AI & Alignment",
-        "Adversarial Training",
-        "Scaling Trends & MoE",
-        "Commonsense Reasoning",
-        "Open Source"
-    ]
+    RANKING_AREAS = {
+        # "AI model":
+        #     "New AI Model",
+        "Hardware":
+            "New hardware technology, hardware architecture, or chip design, "
+            "which could improve the efficiency of HPC, "
+            "AI training, or inference",
+        "Software":
+            "New software library, driver, or framework, which "
+            "could significantly improve the efficiency of HPC, "
+            "AI training, or inference",
+        "Parallel computing":
+            "Parallel computing algorithms or techniques,"
+            " really valuable for HPC workloads",
+        "Fault Tolerance & Checkpointing":
+            "Angorithms or technologies for Fault Tolerance and Checkpointing"
+            " really impacting HPC or AI workloads",
+        "Interconnects & Networking":
+            "New interconnects technologies and new networking technologies,"
+            " really impacting  HPC or AI clusters performance",
+        "Storage":
+            "New storage systems, new file systems, or new data management technologies, "
+            " significantly important for HPC or AI workloads",
+        "Scheduling & Resource Management":
+            "New scheduling resource management techniques, or "
+            "new major improvements for resource management technologies"
+            " for HPC or AI clusters",
+        "Energy Efficiency":
+            "New techniques or new technologies for improving energy"
+            " efficiency in HPC or AI workloads",
+        "Is new":
+            "If the paper presents completely new findings"
+            "or significant updates for existing knowledge"
+    }
 
-    NEW_PROMPT = """Analyze the following research paper and rate it as new or updated result on a scale of 1-10, where:
-- 1 = No new results, just a didgest of previous results
-- 5 = Update of previous results
-- 10 = Completely new result/software/hardware/idea.
-
-Title: {title}
-Abstract: {abstract}
-Summary: {summary}
-
-Return ONLY final JSON, nothing else.
-Result:
-{{"New Rate": X}}"""
-
-    RANKING_PROMPT = """Analyze the following research paper and rate its relevance to EACH research area on a scale of 1-10, where:
+    RANKING_PROMPT = """
+Analyze the following research paper and rate its relevance
+to the topic "{area}" on a scale of 1-10, where:
 - 1 = Not relevant at all
+- 3 = Not much relevant
 - 5 = Somewhat relevant
+- 8 = Relevant
 - 10 = Highly relevant and central to the area
 
-Rate the paper on these research areas:
-{areas}
-
 Title: {title}
 Abstract: {abstract}
 Summary: {summary}
 
-Return ONLY final JSON, nothing else.
+Return ONLY final JSON with a single key "Relevance" and
+a value between 1 and 10, nothing else.
 Result:
-{{{json_sample}}}"""  # type: ignore
+{{"Relevance": X}}"""
 
     console.print("[yellow]Loading arxiv_summaries.json...[/yellow]")
 
@@ -555,92 +558,88 @@ Result:
     ) as progress:
         task = progress.add_task("Analyzing articles", total=len(articles))
 
-        middle = int(len(RANKING_AREAS)/2)
         for article in articles:
             # Format the ranking prompt
-            areas_list1 = "\n".join(
-                [f"- {area}" for area in RANKING_AREAS[:middle]]
+            article['rankings'] = article.get('rankings', {})
+            for key, area in RANKING_AREAS.items():
+                prompt = RANKING_PROMPT.format(
+                    title=article.get('title', ''),
+                    abstract=article.get('abstract', '')[:ABSTRACT_HEAD],
+                    # ^ Limit abstract length
+                    summary=article.get('summary', ''),
+                    area=area,
                 )
-            prompt1 = RANKING_PROMPT.format(
-                title=article.get('title', ''),
-                abstract=article.get('abstract', '')[:ABSTRACT_HEAD],
-                # ^ Limit abstract length
-                summary=article.get('summary', ''),
-                areas=areas_list1,
-                json_sample=",".join(list([
-                    f"\"{x}\": X" for x in RANKING_AREAS[:middle]
-                ]))
-            )
+                response = "No response yet"
+                ok = False
+                for iteration in range(3):  # Try up to 3 times per area
+                    try:
+                        # Generate ranking
+                        response = model.generate(
+                            prompt=prompt,
+                            temperature=0.1,
+                            max_new_tokens=MAX_NEW_TOKENS,
+                            grammar_str=JSON_GRAMMAR
+                        )
 
-            areas_list2 = "\n".join(
-                [f"- {area}" for area in RANKING_AREAS[middle:]]
-                )
-            prompt2 = RANKING_PROMPT.format(
-                title=article.get('title', ''),
-                abstract=article.get('abstract', '')[:ABSTRACT_HEAD],
-                # ^ Limit abstract length
-                summary=article.get('summary', ''),
-                areas=areas_list2,
-                json_sample=",".join(list([
-                    f"\"{x}\": X" for x in RANKING_AREAS[middle:]
-                ]))
-            )
-            prompt_new = NEW_PROMPT.format(
-                title=article.get('title', ''),
-                abstract=article.get('abstract', '')[:ABSTRACT_HEAD],
-                # ^ Limit abstract length
-                summary=article.get('summary', ''),
-                )
-
-            try:
-                article['rankings'] = {}
-                for prompt in (prompt1, prompt2, prompt_new):
-                    # Generate rankings
-                    response = model.generate(
-                        prompt=prompt,
-                        temperature=0.1,
-                        max_new_tokens=MAX_NEW_TOKENS,
-                        grammar_str=JSON_GRAMMAR
-                    )
-
-                    # Parse JSON response
-                    # Clean up response - remove markdown
-                    # code blocks if present
-                    response = response.strip()
-                    if response.startswith('```'):
-                        # Remove markdown code block markers
-                        lines = response.split('\n')
-                        response = '\n'.join(
-                            [line for line in lines
-                             if not line.startswith('```')])
+                        # Parse JSON response
+                        # Clean up response - remove markdown
+                        # code blocks if present
                         response = response.strip()
+                        if response.startswith('```'):
+                            # Remove markdown code block markers
+                            lines = response.split('\n')
+                            response = '\n'.join(
+                                [line for line in lines
+                                    if not line.startswith('```')])
+                            response = response.strip()
 
-                    rankings = json.loads(response)
-                    article['rankings'].update(rankings)
+                        ranking = json.loads(response)
+                        answer = ranking.get('Relevance', -1)
+                        if (not isinstance(answer, int)
+                           or not (1 <= answer <= 10)):
+                            answer = ranking.values()[0]
+                            if (not isinstance(answer, int)
+                               or not (1 <= answer <= 10)):
+                                continue
+                        article['rankings'][key] = answer
+                        console.print(
+                            f"   [cyan]{key}={answer}[/cyan]")
+                        ok = True
+                        break
 
-                console.print(
-                    f"  [cyan]{article['arxiv_id']}[/cyan]: Ranked successfully")
-
-            except json.JSONDecodeError as e:
-                console.print(
-                    "[yellow]Failed to parse rankings for "
-                    f"{article.get('arxiv_id')}: {e}[/yellow]")
-                console.print(
-                    f"[yellow]Response was: {response}[/yellow]")
-                # Set default rankings
-                article['rankings'] = {area: 1 for area in RANKING_AREAS}
-            except Exception as e:
-                console.print(
-                    f"[red]Error processing {article.get('arxiv_id')}: "
-                    f"{e}[/red]")
-                article['rankings'] = {area: 1 for area in RANKING_AREAS}
-
+                    except json.JSONDecodeError as e:
+                        console.print(
+                            "[yellow]Failed to parse rankings for "
+                            f"{article.get('arxiv_id')}/{key}: {e}[/yellow]")
+                        console.print(
+                            f"[yellow]Response was: {response}[/yellow]")
+                        # Set default rankings
+                        article['rankings'][key] = -1
+                    except Exception as e:
+                        console.print(
+                            f"[red]Error processing "
+                            f"{article.get('arxiv_id')}: {e}[/red]")
+                        article['rankings'][key] = -1
+                if not ok:
+                    console.print(
+                        f"[red]Failed to get valid ranking for "
+                        f"{article.get('arxiv_id')}/{key}"
+                        " after 3 attempts[/red]")
+                    article['rankings'][key] = -1
+            max_rank = max(
+                [v for k, v in article['rankings'].items() if k != 'Is new'])
+            article['rankings']['Max'] = max_rank
+            console.print(
+                f"  [cyan]{article['arxiv_id']}[/cyan]:"
+                f" {max_rank}")
             progress.update(task, advance=1)
 
     # Save updated results
     output_file = "arxiv_summaries_ranked.json"
+    filtered_articles = [
+        a for a in articles if a.get('rankings', {'Max': 0})['Max'] >= 7]
     with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(articles, f, indent=2, ensure_ascii=False)
+        json.dump(filtered_articles, f, indent=2, ensure_ascii=False)
 
     console.print(f"[green]Ranked summaries saved to {output_file}[/green]")
 
@@ -679,7 +678,9 @@ def main():
     )
     parser.add_argument(
         '--model',
+        '-m',
         type=str,
+        default='../GGUF/Qwen3-4B-UD-Q5_K_XL.gguf',
         help='Path to GGUF model file or HuggingFace model'
         ' name (required unless --dry-run)'
     )
@@ -692,6 +693,7 @@ def main():
     )
     parser.add_argument(
         '--device',
+        '-d',
         type=str,
         default='auto',
         choices=['auto', 'cuda', 'cpu'],
@@ -699,41 +701,33 @@ def main():
     )
     parser.add_argument(
         '--prompt',
+        '-p',
         type=str,
         help='Custom prompt template (use {title}, {abstract},'
         ' {categories}, {authors})'
     )
     parser.add_argument(
         '--temperature',
+        '-t',
         type=float,
         default=0.1,
         help='Sampling temperature (default: 0.1)'
     )
     parser.add_argument(
         '--max-tokens',
+        '-k',
         type=int,
         default=500,
         help='Maximum tokens to generate (default: 500)'
     )
     parser.add_argument(
         '--dry-run',
+        '-r',
         action='store_true',
         help='Parse files without generating summaries'
     )
-    parser.add_argument(
-        '--post-process',
-        action='store_true',
-        help='Analyze arxiv_summaries.json and add topic '
-             'rankings (requires --model)'
-    )
 
     args = parser.parse_args()
-
-    # Validate arguments
-    if not args.dry_run and not args.post_process and not args.model:
-        parser.error(
-            "--model is required unless --dry-run or "
-            "--post-process is specified")
 
     # Dry run mode - just parse and display
     if args.dry_run:
@@ -755,12 +749,7 @@ def main():
 
         return 0
 
-    if args.post_process:
-        if not args.model:
-            parser.error("--model is required for --post-process")
-        return post_process(args.model)
-
-    # Full processing mode
+    # Summarize first
     results = process_files(
         args.files,
         args.model,
@@ -773,17 +762,21 @@ def main():
     console.print("\n[green]Successfully processed "
                   f"{len(results)} articles[/green]")
 
-    # Display sample results
-    if results:
-        console.print("\n[bold]Sample results:[/bold]\n")
-        for result in results[:3]:
-            console.print(
-                f"[cyan]{result['arxiv_id']}[/cyan]: {result['title']}")
-            if result.get('summary'):
-                console.print(f"  Summary: {result['summary'][:200]}...")
-            console.print()
+    if not args.model:
+        parser.error("--model is required!")
+    return post_process(args.model)
 
-    return 0
+    # # Display sample results
+    # if results:
+    #     console.print("\n[bold]Sample results:[/bold]\n")
+    #     for result in results[:3]:
+    #         console.print(
+    #             f"[cyan]{result['arxiv_id']}[/cyan]: {result['title']}")
+    #         if result.get('summary'):
+    #             console.print(f"  Summary: {result['summary'][:200]}...")
+    #         console.print()
+    #
+    # return 0
 
 
 if __name__ == '__main__':

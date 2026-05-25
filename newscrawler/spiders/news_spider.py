@@ -23,7 +23,7 @@ def url2path(url):
     return ret
 
 
-class HpcwireSpider(scrapy.Spider):
+class NewsSpider(scrapy.Spider):
     name = "news"
 
     start_urls = []
@@ -50,7 +50,7 @@ class HpcwireSpider(scrapy.Spider):
             names = ','.join([x['name'] for x in self.config['sites']])
             urls = list([x['url'] for x in self.config['sites']])
         print(f"Crawling: {names}")
-        HpcwireSpider.start_urls = urls
+        NewsSpider.start_urls = urls
 
     def filename(self, url):
         base = os.environ.get('CRAWL_BASE', ".")
@@ -77,26 +77,6 @@ class HpcwireSpider(scrapy.Spider):
                 errback=self.handle_error,
                 cb_kwargs=site)
         print("End crawling")
-
-    # def start_requests(self):
-    #     only_sites = self.only_sites.split(',') if self.only_sites else None
-
-    #     if only_sites:
-    #         names = ','.join(only_sites)
-    #     else:
-    #         names = ','.join([x['name'] for x in self.config['sites']])
-    #     print(f"Start crawling: {names}")
-    #     for site in self.config["sites"]:
-    #         if only_sites and not site['name'] in only_sites:
-    #             print(f"Skip {site['name']}")
-    #             continue
-    #         print(f"==> {site['name']} ({site['url']})")
-    #         yield scrapy.Request(
-    #             url=site["url"],
-    #             callback=self.parse,
-    #             errback=self.errback_httpbin,
-    #             cb_kwargs=site)
-    #     print("End crawling")
 
     def handle_error(self, failure):
         # log all failures

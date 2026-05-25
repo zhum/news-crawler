@@ -262,16 +262,31 @@ class ArxivServerHandler(BaseHTTPRequestHandler):
         }
 
         .score-high {
+            background: #bff7b5;
+            color: white;
+        }
+
+        .score-high-current {
             background: #4caf50;
             color: white;
         }
 
         .score-medium {
+            background: #f7dea8;
+            color: white;
+        }
+
+        .score-medium-current {
             background: #ff9800;
             color: white;
         }
 
         .score-low {
+            background: #f7b5b5;
+            color: white;
+        }
+
+        .score-low-current {
             background: #f44336;
             color: white;
         }
@@ -426,9 +441,17 @@ class ArxivServerHandler(BaseHTTPRequestHandler):
             loadData(tab);
         }
 
-        function getScoreClass(score) {
-            if (score >= 7) return 'score-high';
-            if (score >= 4) return 'score-medium';
+        function getScoreClass(value,key) {
+            cur = document.getElementById('sortBy').value;
+            // console.log("value:", value, "cur:", cur, "key:", key);
+            cur = cur.replace('rank-', '');  // Remove 'rank-' if present
+            if (key == cur) {
+                if (value >= 8) return 'score-high-current';
+                if (value >= 6) return 'score-medium-current';
+                return 'score-low-current';
+            }
+            if (value >= 8) return 'score-high';
+            if (value >= 6) return 'score-medium';
             return 'score-low';
         }
 
@@ -529,7 +552,7 @@ class ArxivServerHandler(BaseHTTPRequestHandler):
                                 ${Object.entries(article.rankings).map(([key, value]) => `
                                     <div class="ranking-item">
                                         <span class="ranking-label">${key}</span>
-                                        <span class="ranking-score ${getScoreClass(value)}">${value}/10</span>
+                                        <span class="ranking-score ${getScoreClass(value,key)}">${value}/10</span>
                                     </div>
                                 `).join('')}
                                 ${avgRank > 0 ? `
@@ -549,8 +572,7 @@ class ArxivServerHandler(BaseHTTPRequestHandler):
         loadData('ranked');
     </script>
 </body>
-</html>
-        """
+</html>"""  # type: ignore
 
         self.send_response(200)
         self.send_header('Content-type', 'text/html')

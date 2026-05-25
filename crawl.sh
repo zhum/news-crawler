@@ -6,26 +6,27 @@
 CRAWL_BASE="texts"
 ARCH="arch"
 export CRAWL_BASE
-
-declare -a CR=( news )
-
 source ./.venv/bin/activate
-
 if [ -z "${ADDED}" ]; then ADDED="added.txt"; fi
 
-mv "$ADDED" "${ARCH}/${ADDED}-$(date +%F)" 2>/dev/null || true
-mv "summary.json" "s${ARCH}/ummary.json-$(date +%F)" 2>/dev/null || true
+if [ "${1:none}" != nocrawl ]; then
 
-declare -a args
-if [ "${1:-none}" = none ]; then
-  args=()
-else
-  args=( "-a" "only=$1" )
+  declare -a CR=( news )
+
+  mv "$ADDED" "${ARCH}/${ADDED}-$(date +%F)" 2>/dev/null || true
+  mv "summary.json" "s${ARCH}/ummary.json-$(date +%F)" 2>/dev/null || true
+
+  declare -a args
+  if [ "${1:-none}" = none ]; then
+    args=()
+  else
+    args=( "-a" "only=$1" )
+  fi
+
+  for cr in "${CR[@]}"; do
+    scrapy crawl "$cr" "${args[@]}" || echo "Ooops! ($?)"
+  done
 fi
-
-for cr in "${CR[@]}"; do
-  scrapy crawl "$cr" "${args[@]}" || echo "Ooops! ($?)"
-done
 
 ./ai-summary.py summary.json "$ADDED"
 
