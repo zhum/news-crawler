@@ -28,7 +28,7 @@ class NewsSpider(scrapy.Spider):
 
     start_urls = []
 
-    def __init__(self, only=None, conf="config.yaml", *args, **kwargs):
+    def __init__(self, only=None, group=None, conf="config.yaml", *args, **kwargs):
 
         """Load configuration from config.yaml file."""
         config_path = Path(__file__).parent.parent.parent / conf
@@ -41,16 +41,20 @@ class NewsSpider(scrapy.Spider):
 
         super().__init__(*args, **kwargs)
         self.only_sites = only
+        self.only_groups = group
 
+        only_groups = self.only_groups.split(',') if self.only_groups else None
         only_sites = self.only_sites.split(',') if self.only_sites else None
-        all_sites = [s for g in self._get_groups() for s in g['sites']]
+        all_sites = [
+            s for g in self._get_groups()
+            if not only_groups or g['name'] in only_groups
+            for s in g['sites']
+        ]
         if only_sites:
-            filtered = [s for s in all_sites if s['name'] in only_sites]
-        else:
-            filtered = all_sites
-        names = ', '.join(s['name'] for s in filtered)
+            all_sites = [s for s in all_sites if s['name'] in only_sites]
+        names = ', '.join(s['name'] for s in all_sites)
         print(f"Crawling: {names}")
-        NewsSpider.start_urls = [s['url'] for s in filtered]
+        NewsSpider.start_urls = [s['url'] for s in all_sites]
 
     def _get_groups(self):
         if 'groups' in self.config:
@@ -68,10 +72,13 @@ class NewsSpider(scrapy.Spider):
         return f"{base}/{u}.txt"
 
     async def start(self):
+        only_groups = self.only_groups.split(',') if self.only_groups else None
         only_sites = self.only_sites.split(',') if self.only_sites else None
         groups = self._get_groups()
         names = []
         for group in groups:
+            if only_groups and group.get('name') not in only_groups:
+                continue
             added_file = group.get('output', {}).get(
                 'added_file', self.config.get('added', 'added.txt'))
             for site in group['sites']:

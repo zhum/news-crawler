@@ -130,7 +130,8 @@ def process_config(config_path, archive_dir=None, group_filter=None):
     config = yaml.safe_load(Path(config_path).read_text())
     groups = get_groups(config)
     if group_filter:
-        groups = [g for g in groups if g.get('name') == group_filter]
+        names = {n.strip() for n in group_filter.split(',')}
+        groups = [g for g in groups if g.get('name') in names]
     ai_cfg = config.get('ai', {})
     model = ai_cfg.get('model', MODEL)
     temp = ai_cfg.get('temperature', TEMP)
