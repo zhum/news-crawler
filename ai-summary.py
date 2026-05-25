@@ -35,8 +35,9 @@ STRICTLY FOLLOW THIS FORMAT!
 """
 
 PROMPT_TAG = (
-    'Does the following article relate to "{tag}" ({desc})? '
-    'Answer only with a single word: yes or no.\n\n{article}'
+    'On a scale of 1 to 10, how relevant is the topic "{tag}" ({desc}) '
+    'to the following article? '
+    'Answer only with a single integer number.\n\n{article}'
 )
 
 
@@ -65,13 +66,17 @@ def generate_answer(file, lines=LINES, model=MODEL, temp=TEMP, tags=None):
     except Exception:
         data = {"rate": -1, "summary": response}
 
-    # One yes/no call per tag
-    matched = []
+    # One rating call per tag
+    tag_ratings = {}
     for tag_name, desc in (tags or {}).items():
         resp = chain.invoke(PROMPT_TAG.format(tag=tag_name, desc=desc, article=article))
-        if 'yes' in _clean(resp).lower():
-            matched.append(tag_name)
-    data['tags'] = ', '.join(matched)
+        try:
+            rating = int(re.search(r'\d+', _clean(resp)).group())
+            rating = max(1, min(10, rating))
+        except (AttributeError, ValueError):
+            rating = 1
+        tag_ratings[tag_name] = rating
+    data['tags'] = tag_ratings
 
     data['header'] = header
     data['url'] = url

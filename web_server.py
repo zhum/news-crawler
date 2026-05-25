@@ -27,9 +27,28 @@ def get_groups(config):
     }]
 
 
+def active_tag_keys(config, group_filter, all_groups):
+    """Return ordered tag keys relevant to the current group filter."""
+    all_tags = config.get('tags', {})
+    if not all_tags:
+        return []
+    if group_filter:
+        group = next((g for g in all_groups if g['name'] == group_filter), None)
+        if group and 'tags' in group:
+            return [k for k in group['tags'] if k in all_tags]
+    return list(all_tags.keys())
+
+
+def tag_rating(article, key):
+    tags = article.get('tags', {})
+    if isinstance(tags, dict):
+        return tags.get(key, 0)
+    return 0
+
+
 class SummaryHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        pass  # suppress request logging
+        pass
 
     def do_GET(self):
         parsed_url = urlparse(self.path)
@@ -68,17 +87,24 @@ class SummaryHandler(BaseHTTPRequestHandler):
             all_data.sort(key=lambda x: int(x.get("rate", 0)), reverse=reverse)
         elif sort_by == "url":
             all_data.sort(key=lambda x: x.get("url", ""), reverse=reverse)
+        elif sort_by.startswith("tag:"):
+            key = sort_by[4:]
+            all_data.sort(key=lambda x: tag_rating(x, key), reverse=reverse)
         else:
             all_data.sort(key=lambda x: x.get("header", ""), reverse=reverse)
 
-        html = self.generate_html(all_data, groups, group_filter, sort_by, order, errors)
+        tag_keys = active_tag_keys(CONFIG, group_filter, groups)
+        html = self.generate_html(
+            all_data, groups, group_filter, sort_by, order, tag_keys, errors)
 
         self.send_response(200)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
         self.wfile.write(html.encode("utf-8"))
 
-    def generate_html(self, data, all_groups, active_group, current_sort, current_order, errors=None):
+    def generate_html(self, data, all_groups, active_group,
+                      current_sort, current_order, tag_keys, errors=None):
+
         def sort_link(field, display_name):
             group_param = f"&group={active_group}" if active_group else ""
             new_order = (
@@ -94,7 +120,7 @@ class SummaryHandler(BaseHTTPRequestHandler):
                 f'{display_name}{arrow}</a>'
             )
 
-        # Group navigation links
+        # Group navigation
         group_nav = '<a href="?" class="group-link{0}">All</a>'.format(
             ' active' if not active_group else '')
         for g in all_groups:
@@ -104,6 +130,14 @@ class SummaryHandler(BaseHTTPRequestHandler):
                 f'<a href="?group={name}" class="group-link{active_cls}">'
                 f'{self.escape_html(name)}</a>'
             )
+
+        # Tag sort links
+        tag_sort_row = ''
+        if tag_keys:
+            tag_sort_row = '<div class="controls"><strong>Sort by tag:</strong> '
+            tag_sort_row += ' '.join(
+                sort_link(f"tag:{k}", k) for k in tag_keys)
+            tag_sort_row += '</div>'
 
         show_group_badge = not active_group and len(all_groups) > 1
 
@@ -124,11 +158,11 @@ class SummaryHandler(BaseHTTPRequestHandler):
                        text-decoration: none; border-radius: 4px; display: inline-block; }}
         .group-link.active {{ background: #007bff; }}
         .group-link:hover {{ opacity: 0.85; }}
-        .controls {{ margin-bottom: 20px; padding: 15px; background-color: #f8f9fa;
+        .controls {{ margin-bottom: 12px; padding: 12px 15px; background-color: #f8f9fa;
                      border-radius: 5px; text-align: center; }}
-        .controls a {{ margin: 0 15px; padding: 8px 16px; background-color: #007bff;
+        .controls a {{ margin: 3px 6px; padding: 6px 12px; background-color: #007bff;
                         color: white; text-decoration: none; border-radius: 4px;
-                        display: inline-block; }}
+                        display: inline-block; font-size: 0.9em; }}
         .controls a:hover {{ background-color: #0056b3; }}
         .article {{ border: 1px solid #ddd; margin-bottom: 20px; padding: 20px;
                     border-radius: 8px; background-color: #fafafa; }}
@@ -150,6 +184,12 @@ class SummaryHandler(BaseHTTPRequestHandler):
         .stats {{ text-align: center; margin-bottom: 20px; color: #666; font-size: 0.9em; }}
         .notice {{ background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px;
                    padding: 10px 16px; margin-bottom: 20px; color: #856404; font-size: 0.9em; }}
+        .tags {{ margin-top: 10px; display: flex; flex-wrap: wrap; gap: 5px; }}
+        .tag {{ display: inline-block; padding: 2px 8px; border-radius: 10px;
+                font-size: 0.78em; font-weight: bold; white-space: nowrap; }}
+        .tag-high  {{ background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }}
+        .tag-mid   {{ background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }}
+        .tag-low   {{ background: #f8f9fa; color: #6c757d; border: 1px solid #dee2e6; }}
     </style>
 </head>
 <body>
@@ -160,6 +200,7 @@ class SummaryHandler(BaseHTTPRequestHandler):
         if errors:
             for err in errors:
                 html += f'        <div class="notice">⚠ {self.escape_html(err)}</div>\n'
+
         html += f"""
         <div class="stats">Total articles: {len(data)}</div>
         <div class="controls">
@@ -168,17 +209,22 @@ class SummaryHandler(BaseHTTPRequestHandler):
             {sort_link("url", "URL")}
             {sort_link("rate", "Rating")}
         </div>
+        {tag_sort_row}
         <div class="articles">
 """
         for article in data:
             rate = int(article.get("rate", 0))
             rate_class = "high" if rate >= 9 else "medium" if rate >= 8 else ""
+
             group_badge = ""
             if show_group_badge and article.get('_group'):
                 group_badge = (
                     f'<span class="group-badge">'
                     f'{self.escape_html(article["_group"])}</span>'
                 )
+
+            # Tag badges
+            tags_html = self._render_tags(article.get('tags', {}), current_sort)
 
             html += f'''
             <div class="article">
@@ -187,8 +233,8 @@ class SummaryHandler(BaseHTTPRequestHandler):
                 <div class="header">{self.escape_html(article.get("header", "No title"))}</div>
                 <a href="{article.get("url", "#")}" target="_blank" class="url">{self.escape_html(article.get("url", "No URL"))}</a>
                 <div class="summary">{self.escape_html(article.get("summary", "No summary"))}</div>
+                <div class="tags">{tags_html}</div>
                 <div class="file">Source: {self.escape_html(article.get("file", "Unknown"))}</div>
-                <div class="tags">Tags: {self.escape_html(article.get("tags", "No tags"))}</div>
             </div>
 '''  # noqa E501
 
@@ -199,6 +245,33 @@ class SummaryHandler(BaseHTTPRequestHandler):
 </html>
 """
         return html
+
+    def _render_tags(self, tags, current_sort):
+        if not tags:
+            return ""
+        if isinstance(tags, str):
+            return self.escape_html(tags)
+
+        active_tag = current_sort[4:] if current_sort.startswith("tag:") else None
+
+        # Sort: active sort tag first, then by rating descending
+        items = sorted(tags.items(),
+                       key=lambda kv: (kv[0] != active_tag, -kv[1]))
+
+        parts = []
+        for name, rating in items:
+            if rating >= 7:
+                cls = "tag tag-high"
+            elif rating >= 4:
+                cls = "tag tag-mid"
+            else:
+                cls = "tag tag-low"
+            bold = ' style="outline:2px solid #333;"' if name == active_tag else ''
+            parts.append(
+                f'<span class="{cls}"{bold}>'
+                f'{self.escape_html(name)}: {rating}</span>'
+            )
+        return ''.join(parts)
 
     def escape_html(self, text):
         if not text:
