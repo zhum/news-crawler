@@ -18,12 +18,7 @@ TEMP = 0.01
 LINES = 300
 BASE_DIR = "."
 
-TAGS = '''
-"hardware", "software", "benchmarks",
-"new technology", "investments", "market",
-"opensource", "new software", "software update",
-"supercomputing", "AI", "speculations", "other"
-'''
+TAGS = '"hardware", "software", "benchmarks", "new technology", "investments", "market", "opensource", "new software", "software update", "supercomputing", "AI", "speculations", "other"'
 
 PROMPT_1 = (
     """
@@ -45,7 +40,16 @@ STRICTLY FOLLOW THIS FORMAT!
 )
 
 
-def generate_answer(file, lines=LINES, model=MODEL, temp=TEMP):
+def build_tags_string(all_tags, group_tag_keys):
+    """Build tag list string for the prompt from config tag definitions."""
+    parts = []
+    for key in group_tag_keys:
+        desc = all_tags.get(key, '')
+        parts.append(f'"{key}" ({desc})' if desc else f'"{key}"')
+    return ', '.join(parts)
+
+
+def generate_answer(file, lines=LINES, model=MODEL, temp=TEMP, tags=TAGS):
     """Generate an answer."""
     with Path.open(file) as f:
         text = f.read()
@@ -54,7 +58,7 @@ def generate_answer(file, lines=LINES, model=MODEL, temp=TEMP):
     url = text_lines[0][5:]
     header = text_lines[1][8:]
     article = " ".join(text_lines[3:lines])
-    prompt1 = PROMPT_1.format(article=article, TAGS=TAGS)
+    prompt1 = PROMPT_1.format(article=article, TAGS=tags)
 
     chain = ChatOllama(
         model=model,                           # type: ignore
@@ -82,7 +86,7 @@ def archive_file(filepath, archive_dir):
 
 
 def process_group(added_file, outfile, model=MODEL, temp=TEMP, lines=LINES,
-                  archive_dir=None):
+                  archive_dir=None, tags=TAGS):
     if outfile:
         archive_file(outfile, archive_dir)
 
@@ -100,7 +104,7 @@ def process_group(added_file, outfile, model=MODEL, temp=TEMP, lines=LINES,
                 f"Processing {added_file}", total=len(added))
             for file_line in added:
                 _, file = file_line.split(' ')
-                answer = generate_answer(f"{BASE_DIR}/{file}", lines, model, temp)
+                answer = generate_answer(f"{BASE_DIR}/{file}", lines, model, temp, tags)
                 answer["file"] = str(file)
                 answers.append(answer)
                 progress.update(task, advance=1)
@@ -136,12 +140,16 @@ def process_config(config_path, archive_dir=None, group_filter=None):
     temp = ai_cfg.get('temperature', TEMP)
     lines = ai_cfg.get('max_lines', LINES)
 
+    all_tags = config.get('tags', {})
+
     for group in groups:
         out = group.get('output', {})
         added_file = out.get('added_file', 'added.txt')
         summary_file = out.get('summary_file', 'summary.json')
+        group_tag_keys = group.get('tags', list(all_tags.keys()))
+        tags = build_tags_string(all_tags, group_tag_keys) if all_tags else TAGS
         print(f"\n=== Group: {group.get('name', 'default')} ===")
-        process_group(added_file, summary_file, model, temp, lines, archive_dir)
+        process_group(added_file, summary_file, model, temp, lines, archive_dir, tags)
 
 
 # --- CLI entry point ---

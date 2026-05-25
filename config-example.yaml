@@ -13,8 +13,17 @@ ai:
   temperature: 0.01
   max_lines: 300
 
+tags:
+  hardware: "CPUs, GPUs, accelerators, storage"
+  software: "Tools, libraries, frameworks"
+  benchmarks: "Performance results and comparisons"
+  AI: "Machine learning, LLMs, inference"
+  science: "Scientific research and discoveries"
+  other: "Other topics"
+
 groups:
   - name: HPC News
+    tags: [hardware, software, benchmarks, AI, other]
     output:
       added_file: "added.txt"
       summary_file: "summary.json"
@@ -33,6 +42,7 @@ groups:
         articlecss: .article-body
 
   - name: Science
+    tags: [science, AI, other]
     output:
       added_file: "added-science.txt"
       summary_file: "summary-science.json"

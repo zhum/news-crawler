@@ -15,8 +15,24 @@ ai:
   temperature: 0.01
   max_lines: 300
 
+tags:
+  hardware: "CPUs, GPUs, accelerators, storage, interconnects, hardware announcements"
+  software: "Tools, libraries, compilers, runtimes, frameworks"
+  benchmarks: "Performance results, rankings, comparisons"
+  new_technology: "Emerging technologies, research breakthroughs"
+  investments: "Funding rounds, acquisitions, partnerships, business deals"
+  market: "Market trends, adoption, industry analysis"
+  opensource: "Open source projects, licenses, community"
+  software_update: "New versions, patches, releases"
+  supercomputing: "Top500, HPC center installations, national labs"
+  AI: "Machine learning, LLMs, neural networks, inference"
+  speculations: "Opinions, predictions, rumors, editorials"
+  science: "Scientific research, discoveries, publications"
+  other: "Other topics"
+
 groups:
   - name: HPC News
+    tags: [hardware, software, benchmarks, new_technology, investments, market, opensource, software_update, supercomputing, AI, speculations, other]
     output:
       added_file: "added.txt"
       summary_file: "summary.json"
@@ -137,6 +153,7 @@ groups:
         articlecss: .post-body-container
 
   - name: Troitsky Variant
+    tags: [science, new_technology, AI, other]
     spider:
       user_agent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0"
     output:
