@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
 
-# from langchain.chat_models import init_chat_model
 from langchain_ollama import ChatOllama                    # type: ignore
 from langchain_core.output_parsers import StrOutputParser  # type: ignore
 from pathlib import Path
+from datetime import date
 
-# import os
 import re
 from rich.progress import Progress, MofNCompleteColumn, BarColumn
 from rich.progress import TaskProgressColumn, TimeElapsedColumn
 from rich.progress import TimeRemainingColumn
 import json
 import sys
+import yaml
 
-# MODEL = "ollama:gpt-oss:20b"
-# MODEL = "magistral"
 MODEL = "qwen3:14b"
-# MODEL = "llama3.1-8b-long-ctx"
-# MODEL = "gpt-oss-20b-long-ctx:latest"
-#  MODEL = "qwen3:14b"
-#  MODEL = "mistral-nemo"
-
 TEMP = 0.01
-LINES = 300  # 90
-# BASE_DIR = os.environ.get('CRAWL_BASE', ".")
+LINES = 300
 BASE_DIR = "."
 
 TAGS = '''
@@ -52,39 +44,21 @@ STRICTLY FOLLOW THIS FORMAT!
 """
 )
 
-PROMPT_2 = (
-    """
-You are an expert in High Performance Computing.
-Generate a concise summary of the atricle below, using 1-3 sentences,
-and print it in json format: '{{"summary": "SUMMARY"}}'
 
-{article}
-"""
-)
-
-
-def generate_answer(file):
+def generate_answer(file, lines=LINES, model=MODEL, temp=TEMP):
     """Generate an answer."""
     with Path.open(file) as f:
         text = f.read()
 
-    lines = text.splitlines()
-    # header = "\n".join(lines[0:2])
-    url = lines[0][5:]
-    header = lines[1][8:]
-    # lines[2] = "Text:\n"
-    article = " ".join(lines[3:LINES])
-    prompt1 = PROMPT_1.format(
-        article=article,
-        TAGS=TAGS,
-    )
-    # prompt2 = PROMPT_2.format(
-    #     article=article
-    # )
+    text_lines = text.splitlines()
+    url = text_lines[0][5:]
+    header = text_lines[1][8:]
+    article = " ".join(text_lines[3:lines])
+    prompt1 = PROMPT_1.format(article=article, TAGS=TAGS)
 
     chain = ChatOllama(
-        model=MODEL,                           # type: ignore
-        temperature=TEMP) | StrOutputParser()  # type: ignore
+        model=model,                           # type: ignore
+        temperature=temp) | StrOutputParser()  # type: ignore
     response = chain.invoke(prompt1)
     try:
         clean_answer = re.sub(
@@ -97,43 +71,88 @@ def generate_answer(file):
         data = {"rate": -1, "summary": response}
     data["header"] = header
     data["url"] = url
-    # response += "\n==================\n"
-    # response += chain.invoke(prompt2)
-    # return f"{header}\n====\n{response}"
     return data
 
 
-added_file = "added.txt"
-outfile = None
-if (len(sys.argv) > 1):
-    outfile = sys.argv[1]
-    if (len(sys.argv) > 2):
-        added_file = sys.argv[2]
+def archive_file(filepath, archive_dir):
+    p = Path(filepath)
+    if p.exists() and archive_dir:
+        dest = Path(archive_dir) / f"{p.name}-{date.today()}"
+        p.rename(dest)
 
-answers = []
-try:
-    added = Path(added_file).read_text().splitlines()
-    with Progress(
-                  MofNCompleteColumn(),
-                  BarColumn(),
-                  TaskProgressColumn(),
-                  TimeElapsedColumn(),
-                  TimeRemainingColumn()
-                 ) as progress:
-        task = progress.add_task("Processing files", total=len(added))
-        for file_line in added:
-            _, file = file_line.split(' ')
-            answer = generate_answer(f"{BASE_DIR}/{file}")
-            answer["file"] = str(file)
-            # print(answer)
-            answers += [answer]
-            progress.update(task, advance=1)
-except FileNotFoundError:
-    print(f"File {added_file} is missing, nothing to process. Exiting.")
-    exit(1)
 
-if outfile:
-    with open(outfile, 'w') as file:
-        file.write(json.dumps(answers, indent=2))
+def process_group(added_file, outfile, model=MODEL, temp=TEMP, lines=LINES,
+                  archive_dir=None):
+    archive_file(added_file, archive_dir)
+    if outfile:
+        archive_file(outfile, archive_dir)
+
+    answers = []
+    try:
+        added = Path(added_file).read_text().splitlines()
+        with Progress(
+                      MofNCompleteColumn(),
+                      BarColumn(),
+                      TaskProgressColumn(),
+                      TimeElapsedColumn(),
+                      TimeRemainingColumn()
+                     ) as progress:
+            task = progress.add_task(
+                f"Processing {added_file}", total=len(added))
+            for file_line in added:
+                _, file = file_line.split(' ')
+                answer = generate_answer(f"{BASE_DIR}/{file}", lines, model, temp)
+                answer["file"] = str(file)
+                answers.append(answer)
+                progress.update(task, advance=1)
+    except FileNotFoundError:
+        print(f"File {added_file} is missing, skipping.")
+        return
+
+    if outfile:
+        with open(outfile, 'w') as f:
+            f.write(json.dumps(answers, indent=2))
+    else:
+        print(json.dumps(answers, indent=2))
+
+
+def get_groups(config):
+    if 'groups' in config:
+        return config['groups']
+    return [{
+        'name': 'default',
+        'sites': config.get('sites', []),
+        'output': config.get('output', {}),
+    }]
+
+
+def process_config(config_path, archive_dir=None):
+    config = yaml.safe_load(Path(config_path).read_text())
+    groups = get_groups(config)
+    ai_cfg = config.get('ai', {})
+    model = ai_cfg.get('model', MODEL)
+    temp = ai_cfg.get('temperature', TEMP)
+    lines = ai_cfg.get('max_lines', LINES)
+
+    for group in groups:
+        out = group.get('output', {})
+        added_file = out.get('added_file', 'added.txt')
+        summary_file = out.get('summary_file', 'summary.json')
+        print(f"\n=== Group: {group.get('name', 'default')} ===")
+        process_group(added_file, summary_file, model, temp, lines, archive_dir)
+
+
+# --- CLI entry point ---
+
+if len(sys.argv) > 1 and sys.argv[1] == '--config':
+    config_path = sys.argv[2] if len(sys.argv) > 2 else 'config.yaml'
+    archive_dir = None
+    args = sys.argv[3:]
+    if '--archive' in args:
+        idx = args.index('--archive')
+        archive_dir = args[idx + 1]
+    process_config(config_path, archive_dir)
 else:
-    print(json.dumps(answers, indent=2))
+    outfile = sys.argv[1] if len(sys.argv) > 1 else None
+    added_file = sys.argv[2] if len(sys.argv) > 2 else 'added.txt'
+    process_group(added_file, outfile)

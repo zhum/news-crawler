@@ -13,21 +13,33 @@ ai:
   temperature: 0.01
   max_lines: 300
 
-sites:
-  - name: News website
-    url: https://www.newswebsite.com/news/feed
-    css: div.card-body
-    link: a.article-link::attr(href)
-    headercss: .articleHeader::text
-    articlecss: .articleBody
-  - name: RSS website
-    url: https://www.rsswebsite.org/feed
-    css: rss
-    link: link
-    headercss: h1::text
-    articlecss: .article-body
+groups:
+  - name: HPC News
+    output:
+      added_file: "added.txt"
+      summary_file: "summary.json"
+    sites:
+      - name: News website
+        url: https://www.newswebsite.com/news/feed
+        css: div.card-body
+        link: a.article-link::attr(href)
+        headercss: .articleHeader::text
+        articlecss: .articleBody
+      - name: RSS website
+        url: https://www.rsswebsite.org/feed
+        css: rss
+        link: link
+        headercss: h1::text
+        articlecss: .article-body
 
-output:
-  base_dir: "."
-  texts_dir: "texts"
-  summary_file: "summary.json"
+  - name: Science
+    output:
+      added_file: "added-science.txt"
+      summary_file: "summary-science.json"
+    sites:
+      - name: Science website
+        url: https://www.sciencewebsite.org/feed
+        css: rss
+        link: link
+        headercss: h1::text
+        articlecss: .post

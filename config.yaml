@@ -1,0 +1,149 @@
+spider:
+  # Note: trv-science.ru may require a browser user agent:
+  # user_agent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0"
+  user_agent: "newsfetcher (HPC enthusiast)"
+  download_delay: 1
+  concurrent_requests_per_domain: 1
+  robotstxt_obey: true
+
+logging:
+  log_file: "newsfetcher.log"
+  log_level: "INFO"
+
+ai:
+  model: "llama3.1-8b-long-ctx"
+  temperature: 0.01
+  max_lines: 300
+
+groups:
+  - name: HPC News
+    output:
+      added_file: "added.txt"
+      summary_file: "summary.json"
+    sites:
+      - name: "semianalysis"
+        url: "https://newsletter.semianalysis.com/archive"
+        css: ".pc-display-flex"
+        link: "a::attr(href)"
+        headercss: "h1.post-title::text"
+        articlecss: "div.available-content"
+      - name: "hpcwire scienve"
+        url: "https://www.hpcwire.com/sector/science-technology/"
+        css: ".article-content"
+        link: "h3 a::attr(href)"
+        headercss: ".card-head::text"
+        articlecss: "div.gsp_dc"
+      - name: "hpcwire manufacturing"
+        url: "https://www.hpcwire.com/sector/manufacturing/"
+        css: ".article-content"
+        link: "h3 a::attr(href)"
+        headercss: ".card-head::text"
+        articlecss: "div.gsp_dc"
+      - name: "hpcwire academia"
+        url: "https://www.hpcwire.com/sector/academia-research/"
+        css: ".article-content"
+        link: "h3 a::attr(href)"
+        headercss: ".card-head::text"
+        articlecss: "div.gsp_dc"
+      - name: "insidehpc"
+        url: "https://insidehpc.com/category/news-analysis/"
+        css: "div.post"
+        link: "a.entry-title-link::attr(href)"
+        headercss: "h1.entry-title::text"
+        articlecss: "div.post"
+      - name: "eetimes"
+        url: "https://www.eetimes.com/category/news-analysis/"
+        css: "div.card-body"
+        link: "a.article-links::attr(href)"
+        headercss: ".articleHeader-title::text"
+        articlecss: ".articleBody"
+      - name: "the register"
+        url: https://www.theregister.com/on_prem/hpc/
+        css: .headlines
+        link: a.story_link::attr(href)
+        headercss: h1::text
+        articlecss: div#body
+      - name: llnl
+        url: https://hpc.llnl.gov/about-livermore-computing/hpc-news
+        css: .views-field.views-field-title
+        link: h2.field-content.field-news>a::attr(href)
+        headercss: h1.page-header::text
+        articlecss: div#onelab-content
+      - name: slurm blog
+        url: https://www.schedmd.com/blog/
+        css: .post-content-wrap
+        link: a.entire-meta-link::attr(href)
+        headercss: "h1.entry-title::text"
+        articlecss: .container.main-content
+      - name: slurm releases
+        url: https://www.schedmd.com/category/release-announcements/feed/
+        css: rss
+        link: link
+        headercss: "h1::text"
+        articlecss: .post-area
+      - name: NVIDIA news
+        url: https://nvidianews.nvidia.com/news/
+        css: .main_wrap.white_wrap
+        link: .index-item-text-link>a::attr(href)
+        headercss: h1.article-title::text
+        articlecss: .article-body
+      - name: NVIDIA blog
+        url: https://blogs.nvidia.com/blog/author/nvidianewsroom/
+        css: .article-excerpt
+        link: a.read-more::attr(href)
+        headercss: h1::text
+        articlecss: .entry-content
+      - name: HPSF
+        url: https://hpsf.io/blog/
+        css: .list-design.outer
+        link: .list-design.title>a::attr(href)
+        headercss: h1.entry-title::text
+        articlecss: .main-content>.row
+      - name: IEEE Spectrum
+        url: https://spectrum.ieee.org/feeds/type/news.rss
+        css: rss
+        link: link
+        headercss: span.widget__headline-text::text
+        articlecss: .body-description
+      - name: Science news
+        url: https://www.sciencenews.org/topic/computing/feed
+        css: rss
+        link: link
+        headercss: h1::text
+        articlecss: .rich-text--with-sidebar
+      - name: Opencompute
+        url: https://www.opencompute.org/blog
+        css: article
+        link: a.link--gray-darker::attr(href)
+        headercss: h2.news-article__title::text
+        articlecss: section.news-article__body
+      - name: Networkworld
+        url: https://www.networkworld.com/news/
+        css: .content-listing-various__container
+        link: a.content-row-article::attr(href)
+        headercss: h1.article-hero__title::text
+        articlecss: .article-column__content
+      - name: GlennKlockwood
+        url: https://glennklockwood.com/garden/index.xml
+        css: rss
+        link: link
+        headercss: h1.article-title::text
+        articlecss: article.popover-hint
+      - name: GlennKlockwood-blog
+        url: https://blog.glennklockwood.com/feeds/posts/default?alt=rss
+        css: rss
+        link: link
+        headercss: h3.post-title::text
+        articlecss: .post-body-container
+
+  - name: Troitsky Variant
+    output:
+      added_file: "added-tr.txt"
+      summary_file: "summary-tr.json"
+    sites:
+      - name: "Troitsky variant"
+        url: "https://www.trv-science.ru/feed/"
+        css: "rss"
+        link: "link"
+        headercss: "h1::text"
+        articlecss: ".post"

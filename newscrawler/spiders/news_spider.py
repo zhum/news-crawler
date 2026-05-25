@@ -43,14 +43,23 @@ class NewsSpider(scrapy.Spider):
         self.only_sites = only
 
         only_sites = self.only_sites.split(',') if self.only_sites else None
+        all_sites = [s for g in self._get_groups() for s in g['sites']]
         if only_sites:
-            names = ','.join(only_sites)
-            urls = list([x['url'] for x in only_sites])
+            filtered = [s for s in all_sites if s['name'] in only_sites]
         else:
-            names = ','.join([x['name'] for x in self.config['sites']])
-            urls = list([x['url'] for x in self.config['sites']])
+            filtered = all_sites
+        names = ', '.join(s['name'] for s in filtered)
         print(f"Crawling: {names}")
-        NewsSpider.start_urls = urls
+        NewsSpider.start_urls = [s['url'] for s in filtered]
+
+    def _get_groups(self):
+        if 'groups' in self.config:
+            return self.config['groups']
+        return [{
+            'name': 'default',
+            'sites': self.config.get('sites', []),
+            'output': self.config.get('output', {}),
+        }]
 
     def filename(self, url):
         base = os.environ.get('CRAWL_BASE', ".")
@@ -60,22 +69,23 @@ class NewsSpider(scrapy.Spider):
 
     async def start(self):
         only_sites = self.only_sites.split(',') if self.only_sites else None
-
-        if only_sites:
-            names = ','.join(only_sites)
-        else:
-            names = ','.join([x['name'] for x in self.config['sites']])
-        print(f"Start crawling: {names}")
-        for site in self.config["sites"]:
-            if only_sites and not site['name'] in only_sites:
-                print(f"Skip {site['name']}")
-                continue
-            print(f"==> {site['name']} ({site['url']})")
-            yield scrapy.Request(
-                url=site["url"],
-                callback=self.parse,
-                errback=self.handle_error,
-                cb_kwargs=site)
+        groups = self._get_groups()
+        names = []
+        for group in groups:
+            added_file = group.get('output', {}).get(
+                'added_file', self.config.get('added', 'added.txt'))
+            for site in group['sites']:
+                if only_sites and site['name'] not in only_sites:
+                    print(f"Skip {site['name']}")
+                    continue
+                names.append(site['name'])
+                print(f"==> {site['name']} ({site['url']})")
+                yield scrapy.Request(
+                    url=site["url"],
+                    callback=self.parse,
+                    errback=self.handle_error,
+                    cb_kwargs={**site, '_added_file': added_file})
+        print(f"Start crawling: {', '.join(names)}")
         print("End crawling")
 
     def handle_error(self, failure):
@@ -155,13 +165,9 @@ class NewsSpider(scrapy.Spider):
         filename = self.filename(response.url)
         Path(filename).write_text(
             f"URL: {response.url}\nHeader: {header}\nText:\n{markdown}")
-        info = Path(self.config.get("added", "added.txt"))
-        # print("...")
-        with info.open(mode="a+") as f:
-            # fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock
+        added_file = site.get('_added_file', self.config.get('added', 'added.txt'))
+        with Path(added_file).open(mode="a+") as f:
             f.write(f"{date.today()}: {filename}\n")
-            # fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # Unlock
-        # print(f"<<< url={response.url}")
 
     def parse_onepage(self, response, site):
         list = response.css(site['itemcss'])
@@ -173,9 +179,6 @@ class NewsSpider(scrapy.Spider):
             filename = self.filename(f"{site['name']}-{header[:64]}")
             Path(filename).write_text(
                 f"URL: {response.url}\nHeader: {header}\nText:\n{markdown}")
-            info = Path(self.config.get("added", "added.txt"))
-            with info.open(mode="a+") as f:
-                # fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock
+            added_file = site.get('_added_file', self.config.get('added', 'added.txt'))
+            with Path(added_file).open(mode="a+") as f:
                 f.write(f"{date.today()}: {filename}\n")
-                # fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # Unlock
-        # print(f"<<< one <<< url={response.url} ({len(list)})")
