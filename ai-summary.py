@@ -18,39 +18,34 @@ TEMP = 0.01
 LINES = 300
 BASE_DIR = "."
 
-TAGS = '"hardware", "software", "benchmarks", "new technology", "investments", "market", "opensource", "new software", "software update", "supercomputing", "AI", "speculations", "other"'
-
-PROMPT_1 = (
-    """
+PROMPT_RATE_SUMMARY = """
 You are an expert in High Performance Computing.
 On a scale of 1 to 10, where 1 is "very uninteresting"
 and 10 is "extremely interesting," how would you rate
-the following text for a audience, looking for news about new HPC
+the following text for an audience looking for news about new HPC
 technologies, new and updated HPC software, benchmark results,
 lower rate for new hardware installations?
-Add tags from set of {TAGS}, only if tags are really relevant.
-Generate concise summary, 1-3 sentenses, emphasize key point -
-which techology, hardware or software is pointed, what is impact.
-Print only rate and sumary in json format:
-'{{"rate": "RATE", "summary": "SUMMARY", "tags": "TAGSLIST"}}'.
+Generate concise summary, 1-3 sentences, emphasize key point -
+which technology, hardware or software is mentioned, what is the impact.
+Print only rate and summary in json format:
+'{{"rate": "RATE", "summary": "SUMMARY"}}'.
 STRICTLY FOLLOW THIS FORMAT!
 
 {article}
 """
+
+PROMPT_TAG = (
+    'Does the following article relate to "{tag}" ({desc})? '
+    'Answer only with a single word: yes or no.\n\n{article}'
 )
 
 
-def build_tags_string(all_tags, group_tag_keys):
-    """Build tag list string for the prompt from config tag definitions."""
-    parts = []
-    for key in group_tag_keys:
-        desc = all_tags.get(key, '')
-        parts.append(f'"{key}" ({desc})' if desc else f'"{key}"')
-    return ', '.join(parts)
+def _clean(response):
+    return re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
 
 
-def generate_answer(file, lines=LINES, model=MODEL, temp=TEMP, tags=TAGS):
-    """Generate an answer."""
+def generate_answer(file, lines=LINES, model=MODEL, temp=TEMP, tags=None):
+    """Rate, summarise, and tag one article. tags is dict {name: description}."""
     with Path.open(file) as f:
         text = f.read()
 
@@ -58,23 +53,28 @@ def generate_answer(file, lines=LINES, model=MODEL, temp=TEMP, tags=TAGS):
     url = text_lines[0][5:]
     header = text_lines[1][8:]
     article = " ".join(text_lines[3:lines])
-    prompt1 = PROMPT_1.format(article=article, TAGS=tags)
 
     chain = ChatOllama(
-        model=model,                           # type: ignore
+        model=model,
         temperature=temp) | StrOutputParser()  # type: ignore
-    response = chain.invoke(prompt1)
+
+    # Rate + summary
+    response = chain.invoke(PROMPT_RATE_SUMMARY.format(article=article))
     try:
-        clean_answer = re.sub(
-            r'<think>.*</think>',
-            '',
-            response,
-            flags=re.DOTALL)
-        data = json.loads(clean_answer)
+        data = json.loads(_clean(response))
     except Exception:
         data = {"rate": -1, "summary": response}
-    data["header"] = header
-    data["url"] = url
+
+    # One yes/no call per tag
+    matched = []
+    for tag_name, desc in (tags or {}).items():
+        resp = chain.invoke(PROMPT_TAG.format(tag=tag_name, desc=desc, article=article))
+        if 'yes' in _clean(resp).lower():
+            matched.append(tag_name)
+    data['tags'] = ', '.join(matched)
+
+    data['header'] = header
+    data['url'] = url
     return data
 
 
@@ -86,7 +86,7 @@ def archive_file(filepath, archive_dir):
 
 
 def process_group(added_file, outfile, model=MODEL, temp=TEMP, lines=LINES,
-                  archive_dir=None, tags=TAGS):
+                  archive_dir=None, tags=None):
     if outfile:
         archive_file(outfile, archive_dir)
 
@@ -135,20 +135,28 @@ def process_config(config_path, archive_dir=None, group_filter=None):
     if group_filter:
         names = {n.strip() for n in group_filter.split(',')}
         groups = [g for g in groups if g.get('name') in names]
-    ai_cfg = config.get('ai', {})
-    model = ai_cfg.get('model', MODEL)
-    temp = ai_cfg.get('temperature', TEMP)
-    lines = ai_cfg.get('max_lines', LINES)
 
+    ai_cfg = config.get('ai', {})
+    default_model = ai_cfg.get('model', MODEL)
+    default_temp = ai_cfg.get('temperature', TEMP)
+    default_lines = ai_cfg.get('max_lines', LINES)
     all_tags = config.get('tags', {})
 
     for group in groups:
+        # Per-group ai settings fall back to top-level ai section
+        g_ai = group.get('ai', {})
+        model = g_ai.get('model', default_model)
+        temp = g_ai.get('temperature', default_temp)
+        lines = g_ai.get('max_lines', default_lines)
+
+        # Build tags dict for this group: {name: description}
+        group_tag_keys = group.get('tags', list(all_tags.keys()))
+        tags = {k: all_tags[k] for k in group_tag_keys if k in all_tags} or None
+
         out = group.get('output', {})
         added_file = out.get('added_file', 'added.txt')
         summary_file = out.get('summary_file', 'summary.json')
-        group_tag_keys = group.get('tags', list(all_tags.keys()))
-        tags = build_tags_string(all_tags, group_tag_keys) if all_tags else TAGS
-        print(f"\n=== Group: {group.get('name', 'default')} ===")
+        print(f"\n=== Group: {group.get('name', 'default')} (model: {model}) ===")
         process_group(added_file, summary_file, model, temp, lines, archive_dir, tags)
 
 
