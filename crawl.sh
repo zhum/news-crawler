@@ -14,13 +14,17 @@ export CRAWL_BASE
 source ./.venv/bin/activate
 
 # Read group names from config.yaml
-mapfile -t ALL_GROUPS < <(python3 -c "
+if command -v yq &>/dev/null; then
+    mapfile -t ALL_GROUPS < <(yq -r '.groups[].name' config.yaml)
+else
+    mapfile -t ALL_GROUPS < <(python3 -c "
 import yaml
 with open('config.yaml') as f:
     c = yaml.safe_load(f)
 for g in c.get('groups', []):
     print(g['name'])
 ")
+fi
 
 NOCRAWL=false
 if [ "${1:-none}" = "nocrawl" ]; then
