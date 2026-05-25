@@ -63,10 +63,6 @@ class SummaryHandler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 errors.append(f"{summary_file}: invalid JSON")
 
-        if not all_data and errors:
-            self.send_error(404, "; ".join(errors))
-            return
-
         reverse = order == "desc"
         if sort_by == "rate":
             all_data.sort(key=lambda x: int(x.get("rate", 0)), reverse=reverse)
@@ -75,14 +71,14 @@ class SummaryHandler(BaseHTTPRequestHandler):
         else:
             all_data.sort(key=lambda x: x.get("header", ""), reverse=reverse)
 
-        html = self.generate_html(all_data, groups, group_filter, sort_by, order)
+        html = self.generate_html(all_data, groups, group_filter, sort_by, order, errors)
 
         self.send_response(200)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
         self.wfile.write(html.encode("utf-8"))
 
-    def generate_html(self, data, all_groups, active_group, current_sort, current_order):
+    def generate_html(self, data, all_groups, active_group, current_sort, current_order, errors=None):
         def sort_link(field, display_name):
             group_param = f"&group={active_group}" if active_group else ""
             new_order = (
@@ -152,12 +148,19 @@ class SummaryHandler(BaseHTTPRequestHandler):
         .summary {{ line-height: 1.6; color: #555; margin-top: 10px; }}
         .file {{ font-size: 0.8em; color: #666; margin-top: 10px; font-style: italic; }}
         .stats {{ text-align: center; margin-bottom: 20px; color: #666; font-size: 0.9em; }}
+        .notice {{ background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px;
+                   padding: 10px 16px; margin-bottom: 20px; color: #856404; font-size: 0.9em; }}
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Article Summary Viewer</h1>
         <div class="group-nav">{group_nav}</div>
+"""
+        if errors:
+            for err in errors:
+                html += f'        <div class="notice">⚠ {self.escape_html(err)}</div>\n'
+        html += f"""
         <div class="stats">Total articles: {len(data)}</div>
         <div class="controls">
             <strong>Sort by:</strong>
