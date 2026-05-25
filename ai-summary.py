@@ -83,7 +83,6 @@ def archive_file(filepath, archive_dir):
 
 def process_group(added_file, outfile, model=MODEL, temp=TEMP, lines=LINES,
                   archive_dir=None):
-    archive_file(added_file, archive_dir)
     if outfile:
         archive_file(outfile, archive_dir)
 

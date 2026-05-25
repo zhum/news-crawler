@@ -85,6 +85,26 @@ echo "Groups: ${SELECTED_GROUPS[*]}"
 GROUPS_CSV=$(IFS=','; echo "${SELECTED_GROUPS[*]}")
 
 if [ "$NOCRAWL" = false ]; then
+    # Archive each group's added_file before crawl so the spider starts fresh
+    for grp in "${SELECTED_GROUPS[@]}"; do
+        if command -v yq &>/dev/null; then
+            added_file=$(yq -r --arg g "$grp" \
+                '.groups[] | select(.name == $g) | .output.added_file' config.yaml)
+        else
+            added_file=$(GROUP_NAME="$grp" python3 -c "
+import yaml, os
+with open('config.yaml') as f:
+    c = yaml.safe_load(f)
+name = os.environ['GROUP_NAME']
+for g in c.get('groups', []):
+    if g['name'] == name:
+        print(g.get('output', {}).get('added_file', 'added.txt'))
+        break
+")
+        fi
+        [ -f "$added_file" ] && mv "$added_file" "$ARCH/${added_file}-$(date +%F)" 2>/dev/null || true
+    done
+
     scrapy crawl news -a "group=$GROUPS_CSV" || echo "Ooops! ($?)"
 fi
 
