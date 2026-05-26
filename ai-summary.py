@@ -19,14 +19,11 @@ LINES = 300
 BASE_DIR = "."
 
 PROMPT_RATE_SUMMARY = """
-You are an expert in High Performance Computing.
+You are an expert analyst covering the following topic: {topic}.
 On a scale of 1 to 10, where 1 is "very uninteresting"
 and 10 is "extremely interesting," how would you rate
-the following text for an audience looking for news about new HPC
-technologies, new and updated HPC software, benchmark results,
-lower rate for new hardware installations?
-Generate concise summary, 1-3 sentences, emphasize key point -
-which technology, hardware or software is mentioned, what is the impact.
+the following text for an audience interested in {topic}?
+Generate a concise summary in 1-3 sentences, emphasizing the key point.
 Print only rate and summary in json format:
 '{{"rate": "RATE", "summary": "SUMMARY"}}'.
 STRICTLY FOLLOW THIS FORMAT!
@@ -45,7 +42,10 @@ def _clean(response):
     return re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
 
 
-def generate_answer(file, lines=LINES, model=MODEL, temp=TEMP, tags=None):
+DEFAULT_TOPIC = "High Performance Computing: new technologies, software updates, benchmarks"
+
+
+def generate_answer(file, lines=LINES, model=MODEL, temp=TEMP, tags=None, topic=DEFAULT_TOPIC):
     """Rate, summarise, and tag one article. tags is dict {name: description}."""
     with Path.open(file) as f:
         text = f.read()
@@ -60,7 +60,7 @@ def generate_answer(file, lines=LINES, model=MODEL, temp=TEMP, tags=None):
         temperature=temp) | StrOutputParser()  # type: ignore
 
     # Rate + summary
-    response = chain.invoke(PROMPT_RATE_SUMMARY.format(article=article))
+    response = chain.invoke(PROMPT_RATE_SUMMARY.format(article=article, topic=topic))
     try:
         data = json.loads(_clean(response))
     except Exception:
@@ -91,7 +91,7 @@ def archive_file(filepath, archive_dir):
 
 
 def process_group(added_file, outfile, model=MODEL, temp=TEMP, lines=LINES,
-                  archive_dir=None, tags=None):
+                  archive_dir=None, tags=None, topic=DEFAULT_TOPIC):
     if outfile:
         archive_file(outfile, archive_dir)
 
@@ -109,7 +109,7 @@ def process_group(added_file, outfile, model=MODEL, temp=TEMP, lines=LINES,
                 f"Processing {added_file}", total=len(added))
             for file_line in added:
                 _, file = file_line.split(' ')
-                answer = generate_answer(f"{BASE_DIR}/{file}", lines, model, temp, tags)
+                answer = generate_answer(f"{BASE_DIR}/{file}", lines, model, temp, tags, topic)
                 answer["file"] = str(file)
                 answers.append(answer)
                 progress.update(task, advance=1)
@@ -158,11 +158,12 @@ def process_config(config_path, archive_dir=None, group_filter=None):
         group_tag_keys = group.get('tags', list(all_tags.keys()))
         tags = {k: all_tags[k] for k in group_tag_keys if k in all_tags} or None
 
+        topic = group.get('topic', DEFAULT_TOPIC)
         out = group.get('output', {})
         added_file = out.get('added_file', 'added.txt')
         summary_file = out.get('summary_file', 'summary.json')
         print(f"\n=== Group: {group.get('name', 'default')} (model: {model}) ===")
-        process_group(added_file, summary_file, model, temp, lines, archive_dir, tags)
+        process_group(added_file, summary_file, model, temp, lines, archive_dir, tags, topic)
 
 
 # --- CLI entry point ---
