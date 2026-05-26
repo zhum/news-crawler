@@ -16,15 +16,15 @@ ai:
   max_lines: 300
 
 tags:
-  hardware: "CPUs, GPUs, accelerators, storage, interconnects, hardware announcements"
-  software: "Tools, libraries, compilers, runtimes, frameworks"
+  hardware: " News about CPUs, GPUs, HPC accelerators, storage, interconnects, HPC hardware announcements"
+  software: "HPC Tools, libraries, compilers, runtimes, frameworks"
   benchmarks: "Performance results, rankings, comparisons"
   new_technology: "Emerging technologies, research breakthroughs"
   investments: "Funding rounds, acquisitions, partnerships, business deals"
-  market: "Market trends, adoption, industry analysis"
+  market: "HPC Market trends, adoption, industry analysis"
   opensource: "Open source projects, licenses, community"
   software_update: "New versions, patches, releases"
-  supercomputing: "Top500, HPC center installations, national labs"
+  supercomputing: "Top500, HPC center installations, national labs, HPC schedulers"
   AI: "Machine learning, LLMs, neural networks, inference"
   speculations: "Opinions, predictions, rumors, editorials"
   science: "Scientific research, discoveries, publications"
