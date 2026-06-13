@@ -11,7 +11,8 @@ logging:
   log_level: "INFO"
 
 ai:
-  model: "llama3.1-8b-long-ctx"
+  # GGUF model file path (resolved relative to ai-summary.py), not an Ollama name.
+  model: "../GGUF/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
   temperature: 0.01
   max_lines: 300
 

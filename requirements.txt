@@ -1,10 +1,12 @@
 scrapy
 markdownify
-langchain-ollama
-langchain-core
 rich
 pyyaml
 feedparser
 
 
 llama-cpp-python
+llama_index
+llama-index-core llama-index-llms-llama-cpp llama-cpp-python
+llama-index llama-index-vector-stores-faiss faiss-cpu
+llama-index-embeddings-huggingface

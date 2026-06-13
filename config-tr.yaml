@@ -1,0 +1,27 @@
+spider:
+  user_agent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0"
+  download_delay: 1
+  concurrent_requests_per_domain: 1
+  robotstxt_obey: true
+
+logging:
+  log_file: "newsfetcher.log"
+  log_level: "INFO"
+
+ai:
+  model: "../GGUF/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
+  temperature: 0.01
+  max_lines: 300
+
+sites:
+  - name: "Troitsky variant"
+    url: "https://www.trv-science.ru/feed/"
+    css: "rss"
+    link: "link"
+    headercss: "h1::text"
+    articlecss: ".post"
+
+output:
+  base_dir: "."
+  texts_dir: "texts"
+  summary_file: "summary-tr.json"
