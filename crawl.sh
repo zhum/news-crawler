@@ -11,7 +11,7 @@
 CRAWL_BASE="texts"
 ARCH="arch"
 export CRAWL_BASE
-source ./.venv/bin/activate
+source ./venv/bin/activate
 
 # Read group names from config.yaml
 if command -v yq &>/dev/null; then

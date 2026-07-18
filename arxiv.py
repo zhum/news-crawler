@@ -9,6 +9,7 @@ Llama-3.2-3B-Instruct-Q8_0.gguf from bartowski/Llama-3.2-3B-Instruct-GGUF
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -24,6 +25,12 @@ from typing import Union
 ABSTRACT_HEAD = 700
 CTX_LENGTH = 32768
 MAX_NEW_TOKENS = 1500
+
+# KV-cache quantization (matches console-llamacpp.py). ggml type codes:
+# F16=1, Q8_0=8, Q4_0=2. Q4_0 quarters the KV cache vs f16 so it fits in VRAM.
+# V-cache quant REQUIRES flash attention, otherwise llama.cpp keeps it at f16.
+TYPE_K = 2  # Q4_0
+TYPE_V = 2  # Q4_0
 
 # try:
 #     from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -45,6 +52,116 @@ JSON_GRAMMAR = r"""
     """
 
 
+# ══════════════════════════════════════════════════════════════════
+# Prompt formatting — model-family-aware chat templates
+# ══════════════════════════════════════════════════════════════════
+# The GGUF model is chosen at runtime, so the chat template must match whatever
+# family is loaded. Feeding e.g. Gemma the Llama-3 control tokens makes the model
+# emit garbage. Mirrors the implementation in console-llamacpp.py.
+
+CHAT_TEMPLATES = {
+    "llama3": {
+        "bos": "<|begin_of_text|>",
+        "turn": "<|start_header_id|>{role}<|end_header_id|>\n\n{content}<|eot_id|>",
+        "gen": "<|start_header_id|>assistant<|end_header_id|>\n\n",
+        "assistant_role": "assistant",
+        "merge_system": False,
+        "eot": "<|eot_id|>",
+    },
+    "chatml": {  # Qwen, and a safe modern default
+        "bos": "",
+        "turn": "<|im_start|>{role}\n{content}<|im_end|>\n",
+        "gen": "<|im_start|>assistant\n",
+        "assistant_role": "assistant",
+        "merge_system": False,
+        "eot": "<|im_end|>",
+    },
+    "gemma": {  # Gemma has no system role and requires user/model alternation
+        "bos": "<bos>",
+        "turn": "<start_of_turn>{role}\n{content}<end_of_turn>\n",
+        "gen": "<start_of_turn>model\n",
+        "assistant_role": "model",
+        "merge_system": True,
+        "eot": "<end_of_turn>",
+    },
+}
+
+
+def detect_model_family(model_path: str) -> str:
+    """Pick a chat-template family from the GGUF file name."""
+    name = Path(model_path).name.lower()
+    if "gemma" in name:
+        return "gemma"
+    if "qwen" in name or "qwq" in name:
+        return "chatml"
+    if "llama-3" in name or "llama3" in name or "llama-4" in name or "llama4" in name:
+        return "llama3"
+    return "chatml"  # safe default for unknown modern instruct models
+
+
+def _normalize_messages(messages):
+    """Return [(role, content)] from dicts, dropping empties."""
+    out = []
+    for m in messages:
+        content = (m.get("content", "") or "").strip()
+        role = str(m.get("role", "user")).split(".")[-1].lower()
+        if content:
+            out.append((role, content))
+    return out
+
+
+def _render_chat(messages, family: str) -> str:
+    """Render a message list into the prompt string for the given family."""
+    tmpl = CHAT_TEMPLATES[family]
+    mapped, sys_buf = [], []
+    for role, content in _normalize_messages(messages):
+        if role == "system":
+            if tmpl["merge_system"]:
+                sys_buf.append(content)
+                continue
+            r = "system"
+        elif role == "assistant":
+            r = tmpl["assistant_role"]
+        else:
+            r = "user"
+        mapped.append([r, content])
+
+    # Families without a system role (Gemma): fold system into first user turn.
+    if sys_buf:
+        sys_text = "\n\n".join(sys_buf)
+        for pair in mapped:
+            if pair[0] == "user":
+                pair[1] = f"{sys_text}\n\n{pair[1]}"
+                break
+        else:
+            mapped.insert(0, ["user", sys_text])
+
+    # Coalesce consecutive same-role turns (Gemma requires strict alternation).
+    coalesced = []
+    for r, c in mapped:
+        if coalesced and coalesced[-1][0] == r:
+            coalesced[-1][1] += "\n\n" + c
+        else:
+            coalesced.append([r, c])
+
+    out = tmpl["bos"]
+    for r, c in coalesced:
+        out += tmpl["turn"].format(role=r, content=c)
+    out += tmpl["gen"]
+    return out
+
+
+def render_chat_prompt(system: str, user: str, family: str,
+                       assistant_prefix: str = "") -> str:
+    """Build a single-turn (system + user) prompt and optionally prime the answer."""
+    prompt = _render_chat(
+        [{"role": "system", "content": system},
+         {"role": "user", "content": user}],
+        family,
+    )
+    return prompt + assistant_prefix
+
+
 class ModelWrapper:
     """Wrapper for llama-cpp-python GGUF model."""
     def __init__(
@@ -53,14 +170,25 @@ class ModelWrapper:
         n_ctx: int = CTX_LENGTH,
         n_gpu_layers: int = -1,
     ):
+        # Resolve relative model paths against this script's directory (like
+        # console-llamacpp.py), so loading works regardless of the current
+        # working directory. Absolute paths are left unchanged by os.path.join.
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        model_path = os.path.normpath(os.path.join(script_dir, model_path))
         self.model_path = model_path
+        self.family = detect_model_family(model_path)
         console.print(
             f"[yellow]Loading GGUF model from {model_path}...[/yellow]")
+        console.print(
+            f"[yellow]Chat-template family: {self.family}[/yellow]")
         try:
             self.llm = Llama(
                 model_path=model_path,
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,  # set 0 if you want pure CPU
+                flash_attn=True,            # required for V-cache quantization
+                type_k=TYPE_K,
+                type_v=TYPE_V,
                 verbose=False,
             )
             console.print("[green]Model loaded successfully[/green]")
@@ -85,9 +213,10 @@ class ModelWrapper:
                 grammar = None
 
             if stop is None:
+                # Family EOS (belt-and-suspenders; llama.cpp also stops on the
+                # native EOS token) plus the existing semantic guards.
                 stop = [
-                    "<|eot_id|>",
-                    "<|end_of_text|>",
+                    CHAT_TEMPLATES[self.family]["eot"],
                     "\n\n",
                     "Note:"
                 ]
@@ -323,10 +452,24 @@ def split_articles(content: str) -> List[ArxivArticle]:
 #             return ""
 
 
+SUMMARY_SYSTEM = (
+    "You are an expert in computer science research. "
+    "Summarize the paper in 2-3 concise, technical sentences. "
+    "DO NOT provide notes, suggestions, or conversational filler. "
+    "Output ONLY the summary."
+)
+SUMMARY_USER_TEMPLATE = (
+    "Title: {title}\n"
+    "Categories: {categories}\n"
+    "Abstract: {abstract}\n\n"
+    "Provide the summary now."
+)
+
+
 def summarize_with_transformers(
     article: ArxivArticle,
     model: ModelWrapper,
-    prompt_template: str,
+    prompt_template: Optional[str] = None,
     temperature: float = 0.1,
     max_tokens: int = MAX_NEW_TOKENS,
 ) -> Optional[str]:
@@ -344,12 +487,15 @@ def summarize_with_transformers(
     Returns:
         Generated summary text or None if failed
     """
-    # Format the prompt
-    prompt = prompt_template.format(
+    # Build the user body, then wrap it in the model's chat template.
+    user = (prompt_template or SUMMARY_USER_TEMPLATE).format(
         title=article.title or "",
         abstract=article.abstract or "",
         categories=article.categories or "",
         authors=article.authors or "",
+    )
+    prompt = render_chat_prompt(
+        SUMMARY_SYSTEM, user, model.family, assistant_prefix="SUMMARY: ",
     )
 
     try:
@@ -363,6 +509,29 @@ def summarize_with_transformers(
     except Exception as e:
         console.print(
             f"[red]Error generating summary for {article.arxiv_id}: {e}[/red]")
+        return None
+
+
+def read_dir_eml(file_path):
+    content = ''
+    opened = False
+    for file in file_path.iterdir():
+        if file.is_file() and file.name[-4:] == '.eml':
+            with open(file, 'r') as f:
+                opened = True
+                header = True
+                while True:
+                    line = f.readline()
+                    if line == '':
+                        break
+                    if header:
+                        if line == '\n':
+                            header = False
+                    else:
+                        content += line
+    if opened:
+        return content
+    else:
         return None
 
 
@@ -388,33 +557,27 @@ def process_files(
     Returns:
         List of article dictionaries with summaries
     """
-    if prompt_template is None:
-        prompt_template = """
-<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-You are an expert in computer science research.
-Summarize the paper in 2-3 concise, technical sentences.
-DO NOT provide notes, suggestions, or conversational filler.
-Output ONLY the summary.<|eot_id|><|start_header_id|>user<|end_header_id|>
-
-Title: {title}
-Categories: {categories}
-Abstract: {abstract}
-
-Provide the summary now.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-SUMMARY: """
+    # `prompt_template`, when given, is the plain-text USER body (with {title},
+    # {categories}, {abstract} placeholders); the chat template is applied per
+    # model family inside summarize_with_transformers. None -> built-in default.
 
     all_results = []
     total_articles = 0
+    articles = []
 
     # First pass: count articles
     for file_path in file_paths:
         if not file_path.exists():
             console.print(f"[red]File not found: {file_path}[/red]")
             continue
-
-        content = file_path.read_text(encoding='utf-8', errors='ignore')
-        articles = split_articles(content)
-        total_articles += len(articles)
+        if file_path.is_dir():
+            content = read_dir_eml(file_path)
+            if content is None:
+                continue
+        else:
+            content = file_path.read_text(encoding='utf-8', errors='ignore')
+        articles.extend(split_articles(content))
+    total_articles = len(articles)
 
     console.print(
         f"[green]Found {total_articles} articles across"
@@ -437,32 +600,25 @@ SUMMARY: """
     ) as progress:
         task = progress.add_task("Processing articles", total=total_articles)
 
-        for file_path in file_paths:
-            if not file_path.exists():
-                continue
+        for article in articles:
+            result = article.to_dict()
 
-            content = file_path.read_text(encoding='utf-8', errors='ignore')
-            articles = split_articles(content)
+            # Generate summary using transformers
+            summary = summarize_with_transformers(
+                article,
+                model,
+                prompt_template,
+                temperature,
+                max_tokens,
+            )
 
-            for article in articles:
-                result = article.to_dict()
+            result['summary'] = summary
+            # console.print(f": {summary}")
+            # console.print("----------------")
+            result['source_file'] = str(file_path)
+            all_results.append(result)
 
-                # Generate summary using transformers
-                summary = summarize_with_transformers(
-                    article,
-                    model,
-                    prompt_template,
-                    temperature,
-                    max_tokens,
-                )
-
-                result['summary'] = summary
-                # console.print(f": {summary}")
-                # console.print("----------------")
-                result['source_file'] = str(file_path)
-                all_results.append(result)
-
-                progress.update(task, advance=1)
+            progress.update(task, advance=1)
 
     # Save results if output file specified
     if output_file:
@@ -562,13 +718,14 @@ Result:
             # Format the ranking prompt
             article['rankings'] = article.get('rankings', {})
             for key, area in RANKING_AREAS.items():
-                prompt = RANKING_PROMPT.format(
+                user = RANKING_PROMPT.format(
                     title=article.get('title', ''),
                     abstract=article.get('abstract', '')[:ABSTRACT_HEAD],
                     # ^ Limit abstract length
                     summary=article.get('summary', ''),
                     area=area,
                 )
+                prompt = render_chat_prompt("", user, model.family)
                 response = "No response yet"
                 ok = False
                 for iteration in range(3):  # Try up to 3 times per area
@@ -727,6 +884,13 @@ def main():
         help='Parse files without generating summaries'
     )
 
+    parser.add_argument(
+        '--skip-summary',
+        '-s',
+        action='store_true',
+        help='Skip summary generation'
+    )
+
     args = parser.parse_args()
 
     # Dry run mode - just parse and display
@@ -734,13 +898,20 @@ def main():
         for file_path in args.files:
             if not file_path.exists():
                 console.print(f"[red]File not found: {file_path}[/red]")
-                continue
+                return 1
+            if file_path.is_dir():
+                content = read_dir_eml(file_path)
+                if content is None:
+                    console.print(f"[red]No eml files found in {file_path}[/red]")
+                    return 2
+            else:
+                content = file_path.read_text(encoding='utf-8', errors='ignore')
 
-            content = file_path.read_text(encoding='utf-8', errors='ignore')
             articles = split_articles(content)
+            total_articles = len(articles)
 
             console.print(f"\n[bold]File: {file_path}[/bold]")
-            console.print(f"Found {len(articles)} articles:\n")
+            console.print(f"Found {total_articles} articles:\n")
 
             for i, article in enumerate(articles, 1):
                 console.print(f"{i}. {article}")

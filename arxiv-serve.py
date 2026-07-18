@@ -606,7 +606,7 @@ class ArxivServerHandler(BaseHTTPRequestHandler):
         print(f"[ArxivServer] {format % args}")
 
 
-def run_server(port=8000):
+def run_server(port=8002):
     """Start the HTTP server."""
     server_address = ('', port)
     httpd = HTTPServer(server_address, ArxivServerHandler)

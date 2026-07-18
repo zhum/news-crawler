@@ -2,6 +2,7 @@ from pathlib import Path
 import feedparser
 
 import os
+import re
 import scrapy
 import yaml
 from markdownify import markdownify as md
@@ -13,14 +14,13 @@ from twisted.internet.error import TimeoutError, TCPTimedOutError
 
 CONF_FILE = "news_conf.yml"
 
+_URL2PATH_SCHEME_RE = re.compile(r'^https?://')
+_URL2PATH_SEP_RE = re.compile(r'[/ \t]')
+
 
 def url2path(url):
-    ret = url.replace('https://', '')
-    ret = ret.replace('http://', '')
-    ret = ret.replace('/', '-')
-    ret = ret.replace(' ', '-')
-    ret = ret.replace('\t', '-')
-    return ret
+    ret = _URL2PATH_SCHEME_RE.sub('', url)
+    return _URL2PATH_SEP_RE.sub('-', ret)
 
 
 class NewsSpider(scrapy.Spider):
@@ -121,6 +121,23 @@ class NewsSpider(scrapy.Spider):
             request = failure.request
             self.logger.error("TimeoutError on %s", request.url)
 
+    def _existing_files(self):
+        base = os.environ.get('CRAWL_BASE', ".")
+        try:
+            return {entry.name for entry in os.scandir(base) if entry.is_file()}
+        except FileNotFoundError:
+            return set()
+
+    def _save_article(self, filename, url, header, markdown):
+        Path(filename).write_text(
+            f"URL: {url}\nHeader: {header}\nText:\n{markdown}")
+
+    def _append_added(self, added_file, lines):
+        if not lines:
+            return
+        with Path(added_file).open(mode="a+") as f:
+            f.writelines(lines)
+
     def parse(self, response, **kwargs):
         try:
             site = kwargs
@@ -145,13 +162,13 @@ class NewsSpider(scrapy.Spider):
                     # print(f">>>> {items}")
 
             print(f"{len(items)}")  # type: ignore
+            existing = self._existing_files()
             for url in items:  # type: ignore
                 try:
                     if url is None:
                         continue
                     filename = self.filename(url)
-                    if (not Path(filename).is_file() and
-                       url is not None):
+                    if Path(filename).name not in existing:
                         ua = site.get('_user_agent')
                         yield response.follow(
                             url,
@@ -176,22 +193,21 @@ class NewsSpider(scrapy.Spider):
         text = response.css(site["articlecss"]).get()
         markdown = md(text)
         filename = self.filename(response.url)
-        Path(filename).write_text(
-            f"URL: {response.url}\nHeader: {header}\nText:\n{markdown}")
+        self._save_article(filename, response.url, header, markdown)
         added_file = site.get('_added_file', self.config.get('added', 'added.txt'))
-        with Path(added_file).open(mode="a+") as f:
-            f.write(f"{date.today()}: {filename}\n")
+        self._append_added(added_file, [f"{date.today()}: {filename}\n"])
 
     def parse_onepage(self, response, site):
         list = response.css(site['itemcss'])
         print(f"--- one --- url={response.url} ({len(list)})")
+        added_file = site.get('_added_file', self.config.get('added', 'added.txt'))
+        today = date.today()
+        added_lines = []
         for item in list:
             header = item.css(site["headercss"]).get()
             text = item.css(site["articlecss"]).get()
             markdown = md(text)
             filename = self.filename(f"{site['name']}-{header[:64]}")
-            Path(filename).write_text(
-                f"URL: {response.url}\nHeader: {header}\nText:\n{markdown}")
-            added_file = site.get('_added_file', self.config.get('added', 'added.txt'))
-            with Path(added_file).open(mode="a+") as f:
-                f.write(f"{date.today()}: {filename}\n")
+            self._save_article(filename, response.url, header, markdown)
+            added_lines.append(f"{today}: {filename}\n")
+        self._append_added(added_file, added_lines)
