@@ -153,6 +153,36 @@ groups:
         link: link
         headercss: h3.post-title::text
         articlecss: .post-body-container
+      - name: AWS HPC blog
+        url: https://aws.amazon.com/blogs/hpc/feed
+        css: rss
+        link: link
+        headercss: "h1::text"
+        articlecss: "article.blog-post"
+      - name: Azure HPC blog
+        url: https://techcommunity.microsoft.com/tag/hpc?nodeId=board%3AAzureHighPerformanceComputingBlog
+        css: "h4 a"
+        link: "a::attr(href)"
+        headercss: "h1::text"
+        articlecss: "article"
+      - name: TOP500 news
+        url: https://top500.org/news/feed
+        css: rss
+        link: link
+        headercss: "h1::text"
+        articlecss: "article"
+      - name: ServeTheHome
+        url: https://servethehome.com/feed
+        css: rss
+        link: link
+        headercss: "h1::text"
+        articlecss: "td-post-content"
+      - name: AMD ROCm HPC blog
+        url: https://rocm.blogs.amd.com/verticals-hpc.html
+        css: ".sd-card"
+        link: "a.reference::attr(href)"
+        headercss: "h1::text"
+        articlecss: "article.bd-article"
 
   - name: Troitsky Variant
     topic: "Russian popular science: physics, mathematics, biology, astronomy, history of science, science policy"

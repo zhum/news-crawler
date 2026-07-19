@@ -754,7 +754,7 @@ Result:
                         answer = ranking.get('Relevance', -1)
                         if (not isinstance(answer, int)
                            or not (1 <= answer <= 10)):
-                            answer = ranking.values()[0]
+                            answer = next(iter(ranking.values()), -1)
                             if (not isinstance(answer, int)
                                or not (1 <= answer <= 10)):
                                 continue

@@ -111,3 +111,14 @@ fi
 for grp in "${SELECTED_GROUPS[@]}"; do
     ./ai-summary.py --config config.yaml --archive "$ARCH" --group "$grp"
 done
+
+# Combine this run's summaries into one dated digest and push to Drive.
+# Requires: rclone configured with a remote named "gdrive" (run `rclone config`
+# once, pick Google Drive, and share the "15_HPC podcast" folder's ID or just
+# browse to it — see README section "Drive digest upload" for the one-time setup).
+./export_digest.py --config config.yaml --min-rate 6
+if command -v rclone &>/dev/null; then
+    rclone copy digests/ "gdrive:15_HPC podcast/digests/" --update
+else
+    echo "rclone not found — digest written locally to digests/ but not uploaded to Drive" >&2
+fi
