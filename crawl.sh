@@ -10,12 +10,13 @@
 
 CRAWL_BASE="texts"
 ARCH="arch"
+YQ=/usr/bin/yq
 export CRAWL_BASE
 source ./venv/bin/activate
 
 # Read group names from config.yaml
-if command -v yq &>/dev/null; then
-    mapfile -t ALL_GROUPS < <(yq -r '.groups[].name' config.yaml)
+if command -v $YQ &>/dev/null; then
+    mapfile -t ALL_GROUPS < <($YQ -r '.groups[].name' config.yaml)
 else
     mapfile -t ALL_GROUPS < <(python3 -c "
 import yaml
@@ -87,10 +88,10 @@ GROUPS_CSV=$(IFS=','; echo "${SELECTED_GROUPS[*]}")
 if [ "$NOCRAWL" = false ]; then
     # Archive each group's added_file before crawl so the spider starts fresh
     for grp in "${SELECTED_GROUPS[@]}"; do
-        if command -v yq &>/dev/null; then
-            added_file=$(yq -r --arg g "$grp" \
-                '.groups[] | select(.name == $g) | .output.added_file' config.yaml)
-        else
+        # if command -v $YQ &>/dev/null; then
+        #     added_file=$($YQ -r --arg g "$grp" \
+        #         '.groups[] | select(.name == $g) | .output.added_file' config.yaml)
+        # else
             added_file=$(GROUP_NAME="$grp" python3 -c "
 import yaml, os
 with open('config.yaml') as f:
@@ -101,7 +102,7 @@ for g in c.get('groups', []):
         print(g.get('output', {}).get('added_file', 'added.txt'))
         break
 ")
-        fi
+        # fi
         [ -f "$added_file" ] && mv "$added_file" "$ARCH/${added_file}-$(date +%F)" 2>/dev/null || true
     done
 

@@ -10,3 +10,6 @@ llama_index
 llama-index-core llama-index-llms-llama-cpp llama-cpp-python
 llama-index llama-index-vector-stores-faiss faiss-cpu
 llama-index-embeddings-huggingface
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib

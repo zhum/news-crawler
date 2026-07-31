@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 
-source ./.venv/bin/activate
+source ./venv/bin/activate
 
 python3 ./web_server.py
 

@@ -393,20 +393,23 @@ def process_config(config_path, archive_dir=None, group_filter=None):
 
 
 # --- CLI entry point ---
-
-if len(sys.argv) > 1 and sys.argv[1] == '--config':
-    config_path = sys.argv[2] if len(sys.argv) > 2 else 'config.yaml'
-    archive_dir = None
-    group_filter = None
-    args = sys.argv[3:]
-    if '--archive' in args:
-        idx = args.index('--archive')
-        archive_dir = args[idx + 1]
-    if '--group' in args:
-        idx = args.index('--group')
-        group_filter = args[idx + 1]
-    process_config(config_path, archive_dir, group_filter)
-else:
-    outfile = sys.argv[1] if len(sys.argv) > 1 else None
-    added_file = sys.argv[2] if len(sys.argv) > 2 else 'added.txt'
-    process_group(added_file, outfile)
+# Guarded so this file can also be imported as a module (e.g. by
+# generate_digest_email.py, to reuse ModelWrapper/render_chat_prompt for
+# local-model inference) without the CLI logic below firing on import.
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == '--config':
+        config_path = sys.argv[2] if len(sys.argv) > 2 else 'config.yaml'
+        archive_dir = None
+        group_filter = None
+        args = sys.argv[3:]
+        if '--archive' in args:
+            idx = args.index('--archive')
+            archive_dir = args[idx + 1]
+        if '--group' in args:
+            idx = args.index('--group')
+            group_filter = args[idx + 1]
+        process_config(config_path, archive_dir, group_filter)
+    else:
+        outfile = sys.argv[1] if len(sys.argv) > 1 else None
+        added_file = sys.argv[2] if len(sys.argv) > 2 else 'added.txt'
+        process_group(added_file, outfile)

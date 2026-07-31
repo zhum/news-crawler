@@ -3,13 +3,14 @@
 
 CRAWL_BASE="texts"
 ARCH="arch"
+YQ=/usr/bin/yq
 export CRAWL_BASE
 
-source ./.venv/bin/activate
+source ./venv/bin/activate
 
 # Read the Troitsky Variant group name from config (second group, index 1)
-if command -v yq &>/dev/null; then
-    GROUP=$(yq -r '.groups[1].name' config.yaml)
+if command -v $YQ &>/dev/null; then
+    GROUP=$($YQ -r '.groups[1].name' config.yaml)
 else
     GROUP=$(python3 -c "
 import yaml
@@ -21,8 +22,8 @@ fi
 
 if [ "${1:-none}" != nocrawl ]; then
     # Archive added_file before crawl so the spider starts fresh
-    if command -v yq &>/dev/null; then
-        ADDED_FILE=$(yq -r '.groups[1].output.added_file' config.yaml)
+    if command -v $YQ &>/dev/null; then
+        ADDED_FILE=$($YQ -r '.groups[1].output.added_file' config.yaml)
     else
         ADDED_FILE=$(python3 -c "
 import yaml
