@@ -11,9 +11,11 @@ import argparse
 import json
 import os
 import re
+import socket
 import sys
+import urllib.request
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from rich.progress import Progress, MofNCompleteColumn, BarColumn
 from rich.progress import TaskProgressColumn, TimeElapsedColumn
 from rich.progress import TimeRemainingColumn
@@ -21,6 +23,16 @@ from rich.console import Console
 
 from llama_cpp import Llama, LlamaGrammar  # Add LlamaGrammar to imports
 from typing import Union
+
+# Common local model servers to probe when --local-model auto
+_LOCAL_SERVERS = [
+    ("llama.cpp", "localhost", 8011, "/v1/models"),
+    ("Ollama",   "localhost", 11434, "/api/tags"),
+    ("LM Studio","localhost", 1234,  "/v1/models"),
+    ("textgen",  "localhost", 5000,  "/v1/models"),
+]
+
+DEFAULT_GGUF_MODEL = "../GGUF/Qwen3-4B-UD-Q5_K_XL.gguf"
 
 ABSTRACT_HEAD = 700
 CTX_LENGTH = 32768
@@ -76,6 +88,17 @@ CHAT_TEMPLATES = {
         "merge_system": False,
         "eot": "<|im_end|>",
     },
+    # Qwen3.x hybrid-thinking models: chatml with an empty reasoning block
+    # pre-filled (Qwen's official enable_thinking=False form). Without it the
+    # model spends its whole token budget in <think> and never answers.
+    "qwen3": {
+        "bos": "",
+        "turn": "<|im_start|>{role}\n{content}<|im_end|>\n",
+        "gen": "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+        "assistant_role": "assistant",
+        "merge_system": False,
+        "eot": "<|im_end|>",
+    },
     "gemma": {  # Gemma has no system role and requires user/model alternation
         "bos": "<bos>",
         "turn": "<start_of_turn>{role}\n{content}<end_of_turn>\n",
@@ -92,6 +115,8 @@ def detect_model_family(model_path: str) -> str:
     name = Path(model_path).name.lower()
     if "gemma" in name:
         return "gemma"
+    if "qwen3" in name:
+        return "qwen3"
     if "qwen" in name or "qwq" in name:
         return "chatml"
     if "llama-3" in name or "llama3" in name or "llama-4" in name or "llama4" in name:
@@ -162,25 +187,173 @@ def render_chat_prompt(system: str, user: str, family: str,
     return prompt + assistant_prefix
 
 
+def _probe_server(name: str, host: str, port: int, endpoint: str = "/v1/models") -> bool:
+    """Check if a local model server is alive and responding."""
+    try:
+        url = f"http://{host}:{port}{endpoint}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def detect_local_model() -> Tuple[str, str] | None:
+    """Probe common local model servers. Returns (backend_type, model_id) or None."""
+    for name, host, port, endpoint in _LOCAL_SERVERS:
+        if _probe_server(name, host, port, endpoint):
+            try:
+                url = f"http://{host}:{port}{endpoint}"
+                req = urllib.request.Request(url)
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    data = json.loads(resp.read().decode())
+                    if name == "Ollama":
+                        models = data.get("models", [])
+                        model_id = models[0].get("name", "ollama") if models else "ollama"
+                    else:
+                        models = data.get("data", [])
+                        model_id = models[0].get("id", name) if models else name
+                    return (name, model_id)
+            except Exception:
+                return (name, "")
+    return None
+
+
+class ServerModelWrapper:
+    """Wrapper that talks to a running local model server via its OpenAI-compatible API."""
+
+    def __init__(self, host: str = "localhost", port: int = 8011):
+        self.base_url = f"http://{host}:{port}/v1"
+        self.family = "chatml"  # safe default
+        console.print(f"[yellow]Connecting to server at {self.base_url}...[/yellow]")
+        try:
+            req = urllib.request.Request(f"{self.base_url}/models")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode())
+                models = data.get("data", [])
+                if models:
+                    model_id = models[0].get('id', '')
+                    console.print(f"[green]Server running, model: {model_id or '?'}[/green]")
+                    if model_id:
+                        self.family = detect_model_family(model_id)
+                else:
+                    console.print("[yellow]Server running, but no models listed[/yellow]")
+        except Exception as e:
+            console.print(f"[red]Server health check failed: {e}[/red]")
+            raise
+
+    def generate(
+        self,
+        prompt: str,
+        temperature: float = 0.1,
+        max_new_tokens: int = MAX_NEW_TOKENS,
+        grammar_str: Union[str, None] = None,
+        stop: Union[List[str], None] = None,
+        do_sample: bool = True,
+    ) -> str:
+        # The prompt is already a fully-rendered chat template.  Use /v1/completions
+        # (raw text) instead of /v1/chat/completions (messages) to avoid
+        # double-encoding the control tokens.
+        body = json.dumps({
+            "model": "",
+            "prompt": prompt,
+            "temperature": temperature,
+            "max_tokens": max_new_tokens,
+            "top_p": 0.95,
+            "repeat_penalty": 1.2,
+            "top_k": 40,
+            "stop": stop or [],
+            "min_p": 0.05,
+        }).encode()
+        req = urllib.request.Request(
+            f"{self.base_url}/completions",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            # Prompt processing can take minutes when the model is partly
+            # CPU-offloaded; a short timeout abandons work the server keeps doing.
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                result = json.loads(resp.read().decode())
+                return result["choices"][0]["text"].strip()
+        except Exception as e:
+            console.print(f"[red]Error during generation: {e}[/red]")
+            return ""
+
+
 class ModelWrapper:
-    """Wrapper for llama-cpp-python GGUF model."""
+    """Wrapper for llama-cpp-python GGUF model or a remote local server.
+
+    model_path can be:
+      - "auto"        — probe common local servers; fall back to default GGUF
+      - "<path>"      — load GGUF from that path
+      - "<server>"    — connect to a named server (e.g. "ollama", "lmstudio")
+    """
     def __init__(
         self,
         model_path: str,
         n_ctx: int = CTX_LENGTH,
         n_gpu_layers: int = -1,
     ):
-        # Resolve relative model paths against this script's directory (like
-        # console-llamacpp.py), so loading works regardless of the current
-        # working directory. Absolute paths are left unchanged by os.path.join.
+        # ── "auto": detect running server, then fall back to default GGUF ──
+        if model_path == "auto":
+            detected = detect_local_model()
+            if detected:
+                backend, model_id = detected
+                console.print(
+                    f"[cyan]Detected local server: {backend} "
+                    f"(model: {model_id or 'unknown'})[/cyan]")
+                # Find the right host/port for the detected backend
+                for name, host, port, _ in _LOCAL_SERVERS:
+                    if name == backend:
+                        self._wrapped = ServerModelWrapper(host=host, port=port)
+                        break
+                else:
+                    self._wrapped = ServerModelWrapper()
+                self._detected = True
+                return
+            else:
+                console.print(
+                    "[yellow]No local server detected — falling back to "
+                    "default GGUF model.[/yellow]")
+                model_path = DEFAULT_GGUF_MODEL
+
+        # ── Named server shortcut ──
+        server_map = {
+            "ollama":   ("localhost", 11434),
+            "lmstudio": ("localhost", 1234),
+            "textgen":  ("localhost", 5000),
+            "llama":    ("localhost", 8011),
+        }
+        if model_path.lower() in server_map:
+            host, port = server_map[model_path.lower()]
+            console.print(
+                f"[cyan]Connecting to {model_path} server at "
+                f"{host}:{port}...[/cyan]")
+            self._wrapped = ServerModelWrapper(host=host, port=port)
+            self._detected = True
+            return
+
+        # ── Explicit host:port shortcut (any llama.cpp-server-compatible
+        # endpoint on a non-default port, e.g. "localhost:8090") ──
+        m = re.fullmatch(r"([\w.-]+):(\d+)", model_path)
+        if m:
+            host, port = m.group(1), int(m.group(2))
+            console.print(
+                f"[cyan]Connecting to server at {host}:{port}...[/cyan]")
+            self._wrapped = ServerModelWrapper(host=host, port=port)
+            self._detected = True
+            return
+
+        # ── Resolve relative model paths against this script's directory ──
         script_dir = os.path.dirname(os.path.abspath(__file__))
         model_path = os.path.normpath(os.path.join(script_dir, model_path))
         self.model_path = model_path
-        self.family = detect_model_family(model_path)
+        self._family = detect_model_family(model_path)
         console.print(
             f"[yellow]Loading GGUF model from {model_path}...[/yellow]")
         console.print(
-            f"[yellow]Chat-template family: {self.family}[/yellow]")
+            f"[yellow]Chat-template family: {self._family}[/yellow]")
         try:
             self.llm = Llama(
                 model_path=model_path,
@@ -195,6 +368,14 @@ class ModelWrapper:
         except Exception as e:
             console.print(f"[red]Error loading model: {e}[/red]")
             raise
+        self._wrapped = self  # local mode: delegate to self
+        self._detected = False
+
+    @property
+    def family(self) -> str:
+        if self._wrapped is self:
+            return self._family
+        return self._wrapped.family  # type: ignore[attr-defined]
 
     def generate(
         self,
@@ -205,6 +386,17 @@ class ModelWrapper:
         stop: Union[List[str], None] = None,
         do_sample: bool = True,
     ) -> str:
+        if self._wrapped is not self:
+            # Remote server mode: delegate to ServerModelWrapper.
+            return self._wrapped.generate(
+                prompt,
+                temperature=temperature,
+                max_new_tokens=max_new_tokens,
+                grammar_str=grammar_str,
+                stop=stop,
+            )
+
+        # Local GGUF mode: run inference directly via llama-cpp-python.
         # llama-cpp uses max_tokens, not max_new_tokens
         try:
             if grammar_str:
@@ -454,7 +646,7 @@ def split_articles(content: str) -> List[ArxivArticle]:
 
 SUMMARY_SYSTEM = (
     "You are an expert in computer science research. "
-    "Summarize the paper in 2-3 concise, technical sentences. "
+    "Summarize the paper in 2-3 concise, technical sentences, in English. "
     "DO NOT provide notes, suggestions, or conversational filler. "
     "Output ONLY the summary."
 )
@@ -742,6 +934,10 @@ Result:
                         # Clean up response - remove markdown
                         # code blocks if present
                         response = response.strip()
+                        # Strip reasoning-model <think>...</think> blocks
+                        response = re.sub(
+                            r'<think>.*?</think>', '', response,
+                            flags=re.DOTALL).strip()
                         if response.startswith('```'):
                             # Remove markdown code block markers
                             lines = response.split('\n')
@@ -749,6 +945,11 @@ Result:
                                 [line for line in lines
                                     if not line.startswith('```')])
                             response = response.strip()
+
+                        # Extract JSON object in case of stray text
+                        match = re.search(r'\{.*\}', response, re.DOTALL)
+                        if match:
+                            response = match.group(0)
 
                         ranking = json.loads(response)
                         answer = ranking.get('Relevance', -1)
@@ -838,8 +1039,15 @@ def main():
         '-m',
         type=str,
         default='../GGUF/Qwen3-4B-UD-Q5_K_XL.gguf',
-        help='Path to GGUF model file or HuggingFace model'
-        ' name (required unless --dry-run)'
+        help='Path to GGUF model file, or "auto" to detect a running '
+        'local model server (llama.cpp, Ollama, LM Studio); '
+        'falls back to default GGUF if no server is found'
+    )
+    parser.add_argument(
+        '--local-model',
+        type=str,
+        help='Shortcut for a local llama.cpp-server-compatible endpoint, '
+        'e.g. "localhost:8090". Overrides --model.'
     )
     parser.add_argument(
         '--output',
@@ -892,6 +1100,9 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.local_model:
+        args.model = args.local_model
 
     # Dry run mode - just parse and display
     if args.dry_run:

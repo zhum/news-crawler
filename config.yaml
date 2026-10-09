@@ -11,8 +11,10 @@ logging:
   log_level: "INFO"
 
 ai:
-  # GGUF model file path (resolved relative to ai-summary.py), not an Ollama name.
-  model: "../GGUF/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
+  # GGUF model file path (resolved relative to ai-summary.py), or a running
+  # llama.cpp server as "host:port". run_weekly_digest.sh starts the Qwen
+  # server on 8090 before crawling; for manual ./crawl.sh runs start it first.
+  model: "localhost:8090"
   temperature: 0.01
   max_lines: 300
 

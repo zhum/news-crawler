@@ -110,7 +110,10 @@ for g in c.get('groups', []):
 fi
 
 for grp in "${SELECTED_GROUPS[@]}"; do
-    ./ai-summary.py --config config.yaml --archive "$ARCH" --group "$grp"
+    if ! ./ai-summary.py --config config.yaml --archive "$ARCH" --group "$grp"; then
+        echo "ai-summary.py failed for group '$grp' — not exporting a stale digest." >&2
+        exit 1
+    fi
 done
 
 # Combine this run's summaries into one dated digest and push to Drive.
