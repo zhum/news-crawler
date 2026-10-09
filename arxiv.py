@@ -821,9 +821,13 @@ def process_files(
     return all_results
 
 
-def post_process(model_path: str):
+def post_process(model_path: str,
+                 summaries_file: Path = Path("arxiv_summaries.json")):
     """
     Post-process arxiv summaries to add topic rankings.
+
+    Reads summaries_file (the --output of the summary step) and writes the
+    filtered result next to it as <stem>_ranked.json.
 
     Analyzes each article summary and ranks it (1-10)
     on multiple research areas.
@@ -881,9 +885,10 @@ a value between 1 and 10, nothing else.
 Result:
 {{"Relevance": X}}"""
 
-    console.print("[yellow]Loading arxiv_summaries.json...[/yellow]")
+    summaries_file = Path(summaries_file)
+    console.print(f"[yellow]Loading {summaries_file}...[/yellow]")
 
-    with open("arxiv_summaries.json", "r", encoding="utf-8") as f:
+    with open(summaries_file, "r", encoding="utf-8") as f:
         articles = json.load(f)
 
     console.print(f"[green]Found {len(articles)} articles to analyze[/green]")
@@ -993,7 +998,8 @@ Result:
             progress.update(task, advance=1)
 
     # Save updated results
-    output_file = "arxiv_summaries_ranked.json"
+    output_file = summaries_file.with_name(
+        f"{summaries_file.stem}_ranked.json")
     filtered_articles = [
         a for a in articles if a.get('rankings', {'Max': 0})['Max'] >= 7]
     with open(output_file, 'w', encoding='utf-8') as f:
@@ -1146,7 +1152,7 @@ def main():
 
     if not args.model:
         parser.error("--model is required!")
-    return post_process(args.model)
+    return post_process(args.model, args.output)
 
     # # Display sample results
     # if results:

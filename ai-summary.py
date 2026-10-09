@@ -410,10 +410,14 @@ STRICTLY FOLLOW THIS FORMAT!
 {article}
 """
 
+# Article first, tag question last: every tag prompt for one article then
+# shares a long identical prefix, which llama-server's prompt cache reuses
+# instead of re-processing the whole article once per tag.
 PROMPT_TAG = (
+    '{article}\n\n'
     'On a scale of 1 to 10, how relevant is the topic "{tag}" ({desc}) '
-    'to the following article? '
-    'Answer only with a single integer number.\n\n{article}'
+    'to the article above? '
+    'Answer only with a single integer number.'
 )
 
 
