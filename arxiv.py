@@ -13,6 +13,7 @@ import os
 import re
 import socket
 import sys
+import time
 import urllib.request
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -222,25 +223,69 @@ def detect_local_model() -> Tuple[str, str] | None:
 class ServerModelWrapper:
     """Wrapper that talks to a running local model server via its OpenAI-compatible API."""
 
-    def __init__(self, host: str = "localhost", port: int = 8011):
+    def __init__(self, host: str = "localhost", port: int = 8011, model: str = ""):
         self.base_url = f"http://{host}:{port}/v1"
+        self.root_url = f"http://{host}:{port}"
         self.family = "chatml"  # safe default
+        self.model_id = model
+        # llama-server --api-key: read from the same env var the server uses.
+        key = os.environ.get("LLAMA_API_KEY", "")
+        self.headers = {"Content-Type": "application/json"}
+        if key:
+            self.headers["Authorization"] = f"Bearer {key}"
         console.print(f"[yellow]Connecting to server at {self.base_url}...[/yellow]")
         try:
-            req = urllib.request.Request(f"{self.base_url}/models")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                data = json.loads(resp.read().decode())
-                models = data.get("data", [])
-                if models:
-                    model_id = models[0].get('id', '')
-                    console.print(f"[green]Server running, model: {model_id or '?'}[/green]")
-                    if model_id:
-                        self.family = detect_model_family(model_id)
-                else:
-                    console.print("[yellow]Server running, but no models listed[/yellow]")
+            models = self._list_models()
         except Exception as e:
             console.print(f"[red]Server health check failed: {e}[/red]")
             raise
+        if model:
+            entry = next((m for m in models if m.get("id") == model), None)
+            if entry is None:
+                ids = ", ".join(m.get("id", "?") for m in models)
+                raise ValueError(f"Model {model!r} not on server. Available: {ids}")
+        else:
+            # Router mode lists every model in --models-dir; prefer a loaded one.
+            entry = next((m for m in models if self._status(m) in ("", "loaded")), None) \
+                or (models[0] if models else None)
+        if entry is None:
+            console.print("[yellow]Server running, but no models listed[/yellow]")
+            return
+        self.model_id = entry.get("id", "")
+        if self._status(entry) not in ("", "loaded"):
+            self._load_model()
+        console.print(f"[green]Server running, model: {self.model_id or '?'}[/green]")
+        if self.model_id:
+            self.family = detect_model_family(self.model_id)
+
+    @staticmethod
+    def _status(entry: dict) -> str:
+        """Router-mode load state; "" for single-model servers."""
+        return (entry.get("status") or {}).get("value", "")
+
+    def _request(self, url: str, body: Union[dict, None] = None, timeout: int = 10) -> dict:
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(url, data=data, headers=self.headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+
+    def _list_models(self) -> list:
+        return self._request(f"{self.base_url}/models").get("data", [])
+
+    def _load_model(self, timeout: int = 900) -> None:
+        """Router mode with --no-models-autoload: ask server to load, wait for it."""
+        console.print(f"[yellow]Loading {self.model_id} on server...[/yellow]")
+        self._request(f"{self.root_url}/models/load", {"model": self.model_id})
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            entry = next((m for m in self._list_models() if m.get("id") == self.model_id), {})
+            state = self._status(entry)
+            if state == "loaded":
+                return
+            if state not in ("loading", "unloaded"):
+                raise RuntimeError(f"Server failed to load {self.model_id}: {entry.get('status')}")
+            time.sleep(2)
+        raise TimeoutError(f"Model {self.model_id} not loaded after {timeout}s")
 
     def generate(
         self,
@@ -255,7 +300,7 @@ class ServerModelWrapper:
         # (raw text) instead of /v1/chat/completions (messages) to avoid
         # double-encoding the control tokens.
         body = json.dumps({
-            "model": "",
+            "model": self.model_id,
             "prompt": prompt,
             "temperature": temperature,
             "max_tokens": max_new_tokens,
@@ -268,7 +313,7 @@ class ServerModelWrapper:
         req = urllib.request.Request(
             f"{self.base_url}/completions",
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers=self.headers,
         )
         try:
             # Prompt processing can take minutes when the model is partly
@@ -336,12 +381,12 @@ class ModelWrapper:
 
         # ── Explicit host:port shortcut (any llama.cpp-server-compatible
         # endpoint on a non-default port, e.g. "localhost:8090") ──
-        m = re.fullmatch(r"([\w.-]+):(\d+)", model_path)
+        m = re.fullmatch(r"([\w.-]+):(\d+)(?:/(.+))?", model_path)
         if m:
             host, port = m.group(1), int(m.group(2))
             console.print(
                 f"[cyan]Connecting to server at {host}:{port}...[/cyan]")
-            self._wrapped = ServerModelWrapper(host=host, port=port)
+            self._wrapped = ServerModelWrapper(host=host, port=port, model=m.group(3) or "")
             self._detected = True
             return
 
@@ -1009,6 +1054,8 @@ Result:
 
     # Display top articles per category
     console.print("\n[bold]Top articles per category:[/bold]\n")
+    if not articles:  # weeks with no arXiv mail
+        return 0
     for area in RANKING_AREAS:
         # Sort articles by this area's ranking
         sorted_articles = sorted(
@@ -1053,7 +1100,9 @@ def main():
         '--local-model',
         type=str,
         help='Shortcut for a local llama.cpp-server-compatible endpoint, '
-        'e.g. "localhost:8090". Overrides --model.'
+        'e.g. "localhost:8090", or "localhost:8090/<model-id>" for '
+        'router mode (--models-dir). API key read from $LLAMA_API_KEY. '
+        'Overrides --model.'
     )
     parser.add_argument(
         '--output',

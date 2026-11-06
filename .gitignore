@@ -6,3 +6,5 @@ arch/
 *.json
 *.log
 newscrawler/spiders/OLD/
+.env
+unsent-email-*.html
