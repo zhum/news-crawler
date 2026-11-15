@@ -39,6 +39,14 @@ def active_tag_keys(config, group_filter, all_groups):
     return list(all_tags.keys())
 
 
+def article_rate(article):
+    # LLM output: rate may be "N/A" or other non-numeric text
+    try:
+        return int(article.get("rate", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def tag_rating(article, key):
     tags = article.get('tags', {})
     if isinstance(tags, dict):
@@ -84,7 +92,7 @@ class SummaryHandler(BaseHTTPRequestHandler):
 
         reverse = order == "desc"
         if sort_by == "rate":
-            all_data.sort(key=lambda x: int(x.get("rate", 0)), reverse=reverse)
+            all_data.sort(key=article_rate, reverse=reverse)
         elif sort_by == "url":
             all_data.sort(key=lambda x: x.get("url", ""), reverse=reverse)
         elif sort_by.startswith("tag:"):
@@ -213,7 +221,7 @@ class SummaryHandler(BaseHTTPRequestHandler):
         <div class="articles">
 """
         for article in data:
-            rate = int(article.get("rate", 0))
+            rate = article_rate(article)
             rate_class = "high" if rate >= 9 else "medium" if rate >= 8 else ""
 
             group_badge = ""
