@@ -90,6 +90,19 @@ class SummaryHandler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 errors.append(f"{summary_file}: invalid JSON")
 
+        # Crawl problems (e.g. selectors broken by a site redesign)
+        issues_file = CONFIG.get('issues_file', 'crawl_issues.json')
+        try:
+            with open(issues_file, 'r', encoding='utf-8') as f:
+                issues = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            issues = []
+        for i in issues:
+            if not group_filter or i.get('group') == group_filter:
+                errors.append(
+                    f"Crawl issue {i.get('date')} [{i.get('site')}]: "
+                    f"{i.get('problem')} — {i.get('count')}× e.g. {i.get('url')}")
+
         reverse = order == "desc"
         if sort_by == "rate":
             all_data.sort(key=article_rate, reverse=reverse)

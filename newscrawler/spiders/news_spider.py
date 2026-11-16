@@ -3,6 +3,7 @@ import feedparser
 
 import os
 import re
+import json
 import scrapy
 import yaml
 from markdownify import markdownify as md
@@ -42,6 +43,8 @@ class NewsSpider(scrapy.Spider):
         super().__init__(*args, **kwargs)
         self.only_sites = only
         self.only_groups = group
+        self.issues = {}  # (site, problem) -> issue record
+        self.crawled_sites = set()
 
         only_groups = self.only_groups.split(',') if self.only_groups else None
         only_sites = self.only_sites.split(',') if self.only_sites else None
@@ -87,6 +90,7 @@ class NewsSpider(scrapy.Spider):
                     print(f"Skip {site['name']}")
                     continue
                 names.append(site['name'])
+                self.crawled_sites.add(site['name'])
                 print(f"==> {site['name']} ({site['url']})")
                 headers = {'User-Agent': group_ua} if group_ua else {}
                 yield scrapy.Request(
@@ -95,7 +99,8 @@ class NewsSpider(scrapy.Spider):
                     errback=self.handle_error,
                     headers=headers,
                     cb_kwargs={**site, '_added_file': added_file,
-                                '_user_agent': group_ua})
+                                '_user_agent': group_ua,
+                                '_group': group.get('name')})
         print(f"Start crawling: {', '.join(names)}")
         print("End crawling")
 
@@ -121,6 +126,33 @@ class NewsSpider(scrapy.Spider):
             request = failure.request
             self.logger.error("TimeoutError on %s", request.url)
 
+        site = failure.request.cb_kwargs
+        if 'name' in site:
+            self._issue(site, f"fetch failed: {failure.value!r}"[:200],
+                        failure.request.url)
+
+    def _issue(self, site, problem, url):
+        """Record a crawl problem (e.g. selector no longer matching after a
+        site redesign) so it shows in the log and on the web server."""
+        self.logger.warning("ISSUE [%s] %s (%s)", site['name'], problem, url)
+        rec = self.issues.setdefault((site['name'], problem), {
+            'date': str(date.today()), 'group': site.get('_group'),
+            'site': site['name'], 'problem': problem, 'url': url, 'count': 0})
+        rec['count'] += 1
+
+    def closed(self, reason):
+        # Replace previous issues of the sites crawled now; keep the others
+        path = Path(self.config.get('issues_file', 'crawl_issues.json'))
+        try:
+            old = json.loads(path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            old = []
+        kept = [i for i in old if i.get('site') not in self.crawled_sites]
+        path.write_text(json.dumps(kept + list(self.issues.values()), indent=2))
+        if self.issues:
+            self.logger.warning("%d crawl issue(s) written to %s",
+                                len(self.issues), path)
+
     def _existing_files(self):
         base = os.environ.get('CRAWL_BASE', ".")
         try:
@@ -145,21 +177,23 @@ class NewsSpider(scrapy.Spider):
             if site.get('onepage'):
                 # print(f"One page {site['name']}")
                 self.parse_onepage(response, site)
+                return
             else:
                 # print(f"url={site['url']} css={site['css']}")
                 if site['css'] == 'rss':
-                    items = list(map(
-                        lambda e: e.get(site['link']),
-                        feedparser.parse(response.body).entries
-                    ))
-                    # print(f">> {items}")
+                    entries = feedparser.parse(response.body).entries
+                    if not entries:
+                        self._issue(site, "RSS feed has no entries", response.url)
+                    items = [e.get(site['link']) for e in entries]
                 else:
-                    # print(f">> {response.css(site['css'])}")
-                    items = list(map(
-                        lambda e: e.css(site['link']).get(),
-                        response.css(site['css'])
-                    ))
-                    # print(f">>>> {items}")
+                    nodes = response.css(site['css'])
+                    if not nodes:
+                        self._issue(site, f"css '{site['css']}' matched nothing",
+                                    response.url)
+                    items = [e.css(site['link']).get() for e in nodes]
+                if items and not any(items):
+                    self._issue(site, f"link '{site['link']}' matched nothing",
+                                response.url)
 
             print(f"{len(items)}")  # type: ignore
             existing = self._existing_files()
@@ -182,7 +216,7 @@ class NewsSpider(scrapy.Spider):
             # print(f"---> CLOSED {site['url']} ")
         except Exception as e:
             print(f"Parser failed: {e}")
-            pass
+            self._issue(site, f"parser failed: {e}", response.url)
 
     def parse_article(self, response, **kwargs):
         site = kwargs
@@ -190,7 +224,15 @@ class NewsSpider(scrapy.Spider):
         header = response.css(site["headercss"]).get()
         if header:
             header = header.strip()
+        else:
+            self._issue(site, f"headercss '{site['headercss']}' matched nothing",
+                        response.url)
         text = response.css(site["articlecss"]).get()
+        if not text:
+            # don't save: file absence lets the next crawl retry it
+            self._issue(site, f"articlecss '{site['articlecss']}' matched nothing",
+                        response.url)
+            return
         markdown = md(text)
         filename = self.filename(response.url)
         self._save_article(filename, response.url, header, markdown)
@@ -200,12 +242,20 @@ class NewsSpider(scrapy.Spider):
     def parse_onepage(self, response, site):
         list = response.css(site['itemcss'])
         print(f"--- one --- url={response.url} ({len(list)})")
+        if not list:
+            self._issue(site, f"itemcss '{site['itemcss']}' matched nothing",
+                        response.url)
         added_file = site.get('_added_file', self.config.get('added', 'added.txt'))
         today = date.today()
         added_lines = []
         for item in list:
             header = item.css(site["headercss"]).get()
             text = item.css(site["articlecss"]).get()
+            if not header or not text:
+                which = 'headercss' if not header else 'articlecss'
+                self._issue(site, f"{which} '{site[which]}' matched nothing",
+                            response.url)
+                continue
             markdown = md(text)
             filename = self.filename(f"{site['name']}-{header[:64]}")
             self._save_article(filename, response.url, header, markdown)

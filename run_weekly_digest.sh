@@ -157,6 +157,11 @@ if [ "${NOCRAWL:-0}" == "0" ]; then
   fi
 fi
 
+# --- Suggest config.yaml fixes for selectors broken by site redesigns
+# (uses the llama server started above; must run before generate_digest_email.py stops it)
+echo "=== Selector fix suggestions ==="
+./fix-selectors.py --config config.yaml || echo "fix-selectors.py failed ($?)"
+
 # --- Cache the two Drive-only sources (sheet + outline doc) locally.
 # Reuses the same rclone remote already configured for digest upload.
 # --drive-export-formats converts native Google Sheets/Docs to plain

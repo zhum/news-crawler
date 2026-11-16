@@ -4,6 +4,9 @@ spider:
   concurrent_requests_per_domain: 1
   robotstxt_obey: true
 
+# Crawl problems (selectors matching nothing, fetch errors); shown by web_server.py
+issues_file: "crawl_issues.json"
+
 logging:
   log_file: "newsfetcher.log"
   log_level: "INFO"
