@@ -101,18 +101,24 @@ groups:
         link: link
         headercss: "h1::text"
         articlecss: .post-area
+      - name: NVIDIA opensource news
+        url: https://blogs.nvidia.com/blog/tag/open-source/
+        css: a.recent-news-post-title-link
+        link: a.recent-news-post-title-link::attr(href)
+        headercss: "h1.article-title::text, h1.nvidia-heading-xl::text, h1.nvidia-heading-large::text"
+        articlecss: "div.article-body, .full-width-layout__sections, div.entry-content"
       - name: NVIDIA news
         url: https://nvidianews.nvidia.com/news/
-        css: .main_wrap.white_wrap
-        link: .index-item-text-link>a::attr(href)
-        headercss: h1.article-title::text
-        articlecss: .article-body
+        css: article.index-item
+        link: h3.index-item-text-title a::attr(href)
+        headercss: "h1.article-title::text, h1.nvidia-heading-xl::text, h1.nvidia-heading-large::text"
+        articlecss: "div.article-body, .full-width-layout__sections, div.entry-content"
       - name: NVIDIA blog
-        url: https://blogs.nvidia.com/blog/author/nvidianewsroom/
-        css: .article-excerpt
-        link: a.read-more::attr(href)
-        headercss: h1::text
-        articlecss: .entry-content
+        url: https://blogs.nvidia.com/recent-news/
+        css: article.recent-news-post-card
+        link: a.recent-news-post-title-link::attr(href)
+        headercss: "h1.article-title::text, h1.nvidia-heading-xl::text, h1.nvidia-heading-large::text"
+        articlecss: "div.article-body, .full-width-layout__sections, div.entry-content"
       - name: HPSF
         url: https://hpsf.io/blog/
         css: .list-design.outer
@@ -133,10 +139,10 @@ groups:
         articlecss: .rich-text--with-sidebar
       - name: Opencompute
         url: https://www.opencompute.org/blog
-        css: article
-        link: a.link--gray-darker::attr(href)
-        headercss: h2.news-article__title::text
-        articlecss: section.news-article__body
+        css: ol.results-grid li.ocp-content-card
+        link: a.ocp-content-card__heading-link::attr(href)
+        headercss: h1.single-post-hero__title::text
+        articlecss: article.single-post__content
       - name: Networkworld
         url: https://www.networkworld.com/news/
         css: .content-listing-various__container
@@ -178,7 +184,7 @@ groups:
         css: rss
         link: link
         headercss: "h1::text"
-        articlecss: "td-post-content"
+        articlecss: ".td-post-content"
       - name: AMD ROCm HPC blog
         url: https://rocm.blogs.amd.com/verticals-hpc.html
         css: ".sd-card"
