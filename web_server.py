@@ -128,9 +128,12 @@ class SummaryHandler(BaseHTTPRequestHandler):
 
         def sort_link(field, display_name):
             group_param = f"&group={active_group}" if active_group else ""
-            new_order = (
-                "desc" if (current_sort == field and current_order == "asc") else "asc"
-            )
+            # tags: first click high-to-low, then toggle
+            first = "desc" if field.startswith("tag:") else "asc"
+            if current_sort == field:
+                new_order = "asc" if current_order == "desc" else "desc"
+            else:
+                new_order = first
             arrow = (
                 " ↓" if current_sort == field and current_order == "desc"
                 else " ↑" if current_sort == field
@@ -262,6 +265,15 @@ class SummaryHandler(BaseHTTPRequestHandler):
         html += """
         </div>
     </div>
+<script>
+// keep scroll position when a sort link reloads the page
+try {
+    document.querySelectorAll('.controls a').forEach(a => a.addEventListener(
+        'click', () => sessionStorage.setItem('sortScrollY', scrollY)));
+    const y = sessionStorage.getItem('sortScrollY');
+    if (y !== null) { sessionStorage.removeItem('sortScrollY'); scrollTo(0, +y); }
+} catch (e) {}
+</script>
 </body>
 </html>
 """
