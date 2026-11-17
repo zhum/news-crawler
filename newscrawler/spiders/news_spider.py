@@ -84,7 +84,10 @@ class NewsSpider(scrapy.Spider):
                 continue
             added_file = group.get('output', {}).get(
                 'added_file', self.config.get('added', 'added.txt'))
-            group_ua = group.get('spider', {}).get('user_agent')
+            group_spider = group.get('spider', {})
+            group_ua = group_spider.get('user_agent')
+            group_headers = {**({'User-Agent': group_ua} if group_ua else {}),
+                             **group_spider.get('headers', {})}
             for site in group['sites']:
                 if only_sites and site['name'] not in only_sites:
                     print(f"Skip {site['name']}")
@@ -92,14 +95,14 @@ class NewsSpider(scrapy.Spider):
                 names.append(site['name'])
                 self.crawled_sites.add(site['name'])
                 print(f"==> {site['name']} ({site['url']})")
-                headers = {'User-Agent': group_ua} if group_ua else {}
+                headers = {**group_headers, **site.get('headers', {})}
                 yield scrapy.Request(
                     url=site["url"],
                     callback=self.parse,
                     errback=self.handle_error,
                     headers=headers,
                     cb_kwargs={**site, '_added_file': added_file,
-                                '_user_agent': group_ua,
+                                '_headers': headers,
                                 '_group': group.get('name')})
         print(f"Start crawling: {', '.join(names)}")
         print("End crawling")
@@ -203,11 +206,10 @@ class NewsSpider(scrapy.Spider):
                         continue
                     filename = self.filename(url)
                     if Path(filename).name not in existing:
-                        ua = site.get('_user_agent')
                         yield response.follow(
                             url,
                             callback=self.parse_article,
-                            headers={'User-Agent': ua} if ua else {},
+                            headers=site.get('_headers', {}),
                             cb_kwargs=site)
                     else:
                         print(f"==> Skipped \"{url}\"")
